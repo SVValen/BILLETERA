@@ -1,13 +1,3 @@
 {
-  "framework": "nextjs",
-  "functions": {
-    "api/**/*.py": {
-      "runtime": "vercel-python@0.0.0"
-    }
-  },
-  "rewrites": [
-    { "source": "/api/telegram", "destination": "/api/telegram" },
-    { "source": "/api/movements", "destination": "/api/movements" },
-    { "source": "/api/stats", "destination": "/api/stats" }
-  ]
+  "framework": "nextjs"
 }
