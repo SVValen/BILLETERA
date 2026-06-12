@@ -17,27 +17,46 @@ from lib.parser import (
 app = FastAPI()
 
 AYUDA = (
-    "💡 *Cómo registrar:*\n\n"
-    "*Gastos* — monto primero:\n"
+    "💰 *Billetera — Guía rápida*\n\n"
+
+    "📥 *Registrar un gasto:*\n"
     "  `5000 comida`\n"
-    "  `gasté 3000 en nafta`\n\n"
-    "*Ingresos* — palabra primero:\n"
+    "  `gasté 3000 en nafta`\n"
+    "  `15000 ropa` → te pregunta la categoría\n\n"
+
+    "📤 *Registrar un ingreso:*\n"
     "  `sueldo 80000`\n"
     "  `ingreso 50000 freelance`\n\n"
-    "*Dólares* — agregá 'dólares' o 'USD':\n"
-    "  `100 dolares supermercado`\n\n"
-    "*Recurrentes* — recordatorio mensual:\n"
-    "  `40000 internet todos los 1 del mes`\n\n"
-    "*Cuotas* — compra en cuotas:\n"
-    "  `15000 zapatillas 12 cuotas`\n\n"
-    "🎤 *También podés mandar un audio.*\n\n"
+
+    "💵 *En dólares* — convertidos al oficial:\n"
+    "  `100 dolares supermercado`\n"
+    "  `2.49 usd spotify`\n\n"
+
+    "🔁 *Gasto recurrente* — recordatorio mensual:\n"
+    "  `40000 internet todos los 1 del mes`\n"
+    "  `2.49 usd spotify todos los 15 del mes`\n"
+    "  _(el bot te avisa cada mes para confirmar)_\n\n"
+
+    "💳 *Compra en cuotas:*\n"
+    "  `150000 tele 12 cuotas`\n"
+    "  `500 usd laptop 6 cuotas`\n\n"
+
+    "🎤 *Audio* — mandá un mensaje de voz.\n\n"
+
     "📋 *Comandos:*\n"
-    "  /id — Tu Telegram ID\n"
-    "  /editar — Editar un movimiento reciente\n"
-    "  /borrar — Borrar un movimiento reciente\n"
-    "  /presupuesto — Estado de presupuestos\n"
-    "  /recurrentes — Gastos recurrentes\n"
-    "  /ayuda — Esta ayuda"
+    "  `/presupuesto` — ver estado de tus presupuestos\n"
+    "  `/presupuesto comida 20000` — fijar presupuesto mensual\n"
+    "    _(categorías: super, comida, transporte, servicios,\n"
+    "    entretenimiento, salud, ropa, vivienda, mascotas,\n"
+    "    viajes, seguros, inversiones, compras, belleza,\n"
+    "    suscripciones, otros)_\n"
+    "  `/editar` — elegir un movimiento reciente para editar\n"
+    "  `/editar comida` — filtrar por palabra y editar\n"
+    "  `/borrar` — elegir un movimiento reciente para borrar\n"
+    "  `/borrar netflix` — filtrar por palabra y borrar\n"
+    "  `/recurrentes` — ver tus gastos recurrentes activos\n"
+    "  `/id` — tu Telegram ID (para vincular el dashboard)\n"
+    "  `/ayuda` — esta guía"
 )
 
 CAT_BUTTONS = [
@@ -73,6 +92,7 @@ CAT_NAME_MAP = {
     "inversiones": 14, "ahorro": 14,
     "compras": 15, "online": 15,
     "belleza": 16, "gym": 16, "gimnasio": 16,
+    "suscripciones": 18, "suscripcion": 18, "suscripción": 18,
 }
 
 DOLLAR_KEYWORDS = {"dolar", "dolares", "dólares", "usd", "u$s", "us$", "dólar"}
