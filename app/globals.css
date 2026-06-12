@@ -131,3 +131,73 @@ td.date { color: #888; white-space: nowrap; }
   .card-value { font-size: 22px; }
   .header h1 { font-size: 18px; }
 }
+
+/* ── Auth pages (login / configurar) ── */
+.auth-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+.auth-card {
+  background: #fff;
+  border-radius: 16px;
+  padding: 40px 36px;
+  box-shadow: 0 4px 24px rgba(0,0,0,.1);
+  width: 100%;
+  max-width: 420px;
+}
+.auth-title { margin: 0 0 8px; font-size: 24px; font-weight: 700; }
+.auth-sub { margin: 0 0 24px; color: #666; font-size: 14px; line-height: 1.6; }
+.auth-sub code { background: #f0f0f0; padding: 2px 6px; border-radius: 4px; font-size: 13px; }
+.auth-form { display: flex; flex-direction: column; gap: 12px; }
+.auth-input {
+  border: 1.5px solid #ddd;
+  border-radius: 10px;
+  padding: 12px 14px;
+  font-size: 15px;
+  outline: none;
+  transition: border-color .15s;
+  width: 100%;
+}
+.auth-input:focus { border-color: #6366f1; }
+.auth-btn {
+  background: #6366f1;
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  padding: 12px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .15s;
+}
+.auth-btn:hover:not(:disabled) { background: #4f46e5; }
+.auth-btn:disabled { opacity: .6; cursor: not-allowed; }
+.auth-error { margin: 0; color: #ef4444; font-size: 13px; }
+.auth-success { text-align: center; }
+.auth-success p:first-child { font-size: 32px; margin: 0 0 8px; }
+
+/* ── Nav bar ── */
+.nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  height: 48px;
+  background: #fff;
+  border-bottom: 1px solid #eee;
+  margin-bottom: 0;
+}
+.nav-title { font-weight: 700; font-size: 16px; }
+.nav-user { font-size: 13px; color: #888; display: flex; align-items: center; gap: 12px; }
+.nav-logout {
+  background: none; border: none; cursor: pointer;
+  font-size: 13px; color: #6366f1; padding: 0;
+  text-decoration: underline;
+}
+
+@media (max-width: 480px) {
+  .auth-card { padding: 28px 20px; }
+}
