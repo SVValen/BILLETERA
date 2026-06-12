@@ -2,92 +2,57 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
-import {
-  PieChart, Pie, Cell, Tooltip, Legend,
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer,
-} from 'recharts'
 import { createSupabaseBrowser } from '@/lib/supabase-browser'
+import ResumenTab from './ResumenTab'
+import PresupuestosTab from './PresupuestosTab'
+import ObjetivosTab from './ObjetivosTab'
+import MovimientosTab from './MovimientosTab'
 
-interface Stats {
-  mes: string
-  total_gastos: number
-  total_ingresos: number
-  saldo: number
-  por_categoria: Record<string, { monto: number; emoji: string }>
-}
+type Tab = 'resumen' | 'presupuestos' | 'objetivos' | 'movimientos'
 
-interface Movement {
-  id: number
-  fecha: string
-  descripcion: string
-  monto: number
-  tipo: 'gasto' | 'ingreso'
-  origen: string
-  categorias: { nombre: string; emoji: string } | null
-}
-
-const COLORS = ['#6366f1', '#f59e0b', '#ef4444', '#06b6d4', '#a855f7', '#ec4899', '#84cc16']
-
-function fmt(n: number) {
-  return new Intl.NumberFormat('es-AR', {
-    style: 'currency', currency: 'ARS', maximumFractionDigits: 0,
-  }).format(n)
-}
+const TABS: { id: Tab; label: string }[] = [
+  { id: 'resumen', label: 'Resumen' },
+  { id: 'presupuestos', label: 'Presupuestos' },
+  { id: 'objetivos', label: 'Objetivos' },
+  { id: 'movimientos', label: 'Movimientos' },
+]
 
 export default function Dashboard() {
-  const [stats, setStats] = useState<Stats | null>(null)
-  const [movements, setMovements] = useState<Movement[]>([])
+  const [tab, setTab] = useState<Tab>('resumen')
   const [mes, setMes] = useState(() => new Date().toISOString().slice(0, 7))
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
   const [userEmail, setUserEmail] = useState<string | null>(null)
   const [telegramId, setTelegramId] = useState<string | null>(null)
+  const [dark, setDark] = useState(false)
   const router = useRouter()
 
-  // Auth check + obtener telegram_id del perfil
+  // Auth
   useEffect(() => {
     async function checkAuth() {
       const supabase = createSupabaseBrowser()
       const { data: { user } } = await supabase.auth.getUser()
-
       if (!user) { router.push('/login'); return }
-
       setUserEmail(user.email ?? null)
-
       const { data: perfil } = await supabase
-        .from('perfiles')
-        .select('telegram_id')
-        .eq('id', user.id)
-        .single()
-
+        .from('perfiles').select('telegram_id').eq('id', user.id).single()
       if (!perfil?.telegram_id) { router.push('/configurar'); return }
-
       setTelegramId(perfil.telegram_id)
     }
     checkAuth()
   }, [router])
 
-  const fetchData = useCallback(async () => {
-    if (!telegramId) return
-    setLoading(true)
-    setError(null)
-    try {
-      const [sRes, mRes] = await Promise.all([
-        fetch(`/api/stats?mes=${mes}&usuario=${telegramId}`),
-        fetch(`/api/movements?mes=${mes}&usuario=${telegramId}`),
-      ])
-      if (!sRes.ok || !mRes.ok) throw new Error('Error al cargar datos')
-      const [sData, mData] = await Promise.all([sRes.json(), mRes.json()])
-      setStats(sData)
-      setMovements(mData)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Error desconocido')
-    } finally {
-      setLoading(false)
-    }
-  }, [mes, telegramId])
+  // Dark mode
+  useEffect(() => {
+    const saved = localStorage.getItem('dark') === '1'
+    setDark(saved)
+    document.documentElement.classList.toggle('dark', saved)
+  }, [])
 
-  useEffect(() => { fetchData() }, [fetchData])
+  function toggleDark() {
+    const next = !dark
+    setDark(next)
+    localStorage.setItem('dark', next ? '1' : '0')
+    document.documentElement.classList.toggle('dark', next)
+  }
 
   async function handleLogout() {
     const supabase = createSupabaseBrowser()
@@ -95,21 +60,11 @@ export default function Dashboard() {
     router.push('/login')
   }
 
-  const pieData = stats
-    ? Object.entries(stats.por_categoria).map(([name, v]) => ({
-        name: `${v.emoji} ${name}`,
-        value: v.monto,
-      }))
-    : []
-
-  const barData = stats
-    ? [{ name: mes, Gastos: stats.total_gastos, Ingresos: stats.total_ingresos }]
-    : []
-
-  // Mostrar pantalla de carga hasta tener telegramId
   if (!telegramId) {
     return <div className="auth-page"><p style={{ color: '#aaa' }}>Verificando sesión...</p></div>
   }
+
+  const showMes = tab === 'resumen' || tab === 'presupuestos' || tab === 'movimientos'
 
   return (
     <>
@@ -117,126 +72,38 @@ export default function Dashboard() {
       <div className="nav">
         <span className="nav-title">Billetera 💰</span>
         <div className="nav-user">
-          <span>{userEmail}</span>
+          <button className="btn-icon" onClick={toggleDark} title={dark ? 'Modo claro' : 'Modo oscuro'}>
+            {dark ? '☀️' : '🌙'}
+          </button>
+          <span className="nav-email">{userEmail}</span>
           <button className="nav-logout" onClick={handleLogout}>Salir</button>
         </div>
       </div>
 
-      <div className="page">
-        {/* Header */}
-        <div className="header">
-          <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700 }}>Resumen</h1>
-          <div className="header-right">
-            <label htmlFor="mes-input">Mes:</label>
-            <input
-              id="mes-input"
-              type="month"
-              value={mes}
-              onChange={e => setMes(e.target.value)}
-              className="month-input"
-            />
-          </div>
+      {/* Tabs + mes selector */}
+      <div className="tabs-bar">
+        <div className="tabs">
+          {TABS.map(t => (
+            <button key={t.id} className={`tab-btn ${tab === t.id ? 'active' : ''}`} onClick={() => setTab(t.id)}>
+              {t.label}
+            </button>
+          ))}
         </div>
-
-        {error && <div className="error-banner">{error}</div>}
-
-        {loading ? (
-          <p className="loading">Cargando...</p>
-        ) : stats && (
-          <>
-            {/* Tarjetas resumen */}
-            <div className="cards">
-              <div className="card">
-                <p className="card-label">Gastos</p>
-                <p className="card-value gasto">{fmt(stats.total_gastos)}</p>
-              </div>
-              <div className="card">
-                <p className="card-label">Ingresos</p>
-                <p className="card-value ingreso">{fmt(stats.total_ingresos)}</p>
-              </div>
-              <div className="card">
-                <p className="card-label">Saldo</p>
-                <p className={`card-value ${stats.saldo >= 0 ? 'ingreso' : 'gasto'}`}>
-                  {fmt(stats.saldo)}
-                </p>
-              </div>
-            </div>
-
-            {/* Gráficos */}
-            <div className="charts">
-              <div className="chart-box">
-                <h3>Por categoría</h3>
-                {pieData.length === 0 ? (
-                  <p className="empty">Sin gastos este mes</p>
-                ) : (
-                  <ResponsiveContainer width="100%" height={230}>
-                    <PieChart>
-                      <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={85} label={false}>
-                        {pieData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
-                      </Pie>
-                      <Tooltip formatter={(v) => fmt(v as number)} />
-                      <Legend iconSize={10} wrapperStyle={{ fontSize: 12 }} />
-                    </PieChart>
-                  </ResponsiveContainer>
-                )}
-              </div>
-
-              <div className="chart-box">
-                <h3>Resumen del mes</h3>
-                <ResponsiveContainer width="100%" height={230}>
-                  <BarChart data={barData} margin={{ top: 4, right: 4, left: 10, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                    <XAxis dataKey="name" tick={{ fontSize: 12 }} />
-                    <YAxis tickFormatter={v => `$${(v / 1000).toFixed(0)}k`} tick={{ fontSize: 11 }} />
-                    <Tooltip formatter={(v) => fmt(v as number)} />
-                    <Bar dataKey="Gastos" fill="#ef4444" radius={[6, 6, 0, 0]} />
-                    <Bar dataKey="Ingresos" fill="#22c55e" radius={[6, 6, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-
-            {/* Tabla */}
-            <div className="table-box">
-              <div className="table-header">
-                <h3>Movimientos{movements.length > 0 ? ` (${movements.length})` : ''}</h3>
-              </div>
-              {movements.length === 0 ? (
-                <p className="empty">
-                  Sin movimientos este mes.<br />
-                  <span>Enviá un mensaje a tu bot de Telegram para registrar uno.</span>
-                </p>
-              ) : (
-                <div className="table-scroll">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Fecha</th>
-                        <th>Descripción</th>
-                        <th>Categoría</th>
-                        <th>Origen</th>
-                        <th className="right">Monto</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {movements.map(m => (
-                        <tr key={m.id}>
-                          <td className="date">{m.fecha}</td>
-                          <td>{m.descripcion}</td>
-                          <td>{m.categorias ? `${m.categorias.emoji} ${m.categorias.nombre}` : '—'}</td>
-                          <td className="muted">{m.origen}</td>
-                          <td className={`right ${m.tipo}`}>
-                            {m.tipo === 'gasto' ? '-' : '+'}{fmt(m.monto)}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          </>
+        {showMes && (
+          <input
+            type="month"
+            value={mes}
+            onChange={e => setMes(e.target.value)}
+            className="month-input"
+          />
         )}
+      </div>
+
+      <div className="page">
+        {tab === 'resumen' && <ResumenTab telegramId={telegramId} mes={mes} />}
+        {tab === 'presupuestos' && <PresupuestosTab telegramId={telegramId} mes={mes} />}
+        {tab === 'objetivos' && <ObjetivosTab telegramId={telegramId} />}
+        {tab === 'movimientos' && <MovimientosTab telegramId={telegramId} mes={mes} />}
       </div>
     </>
   )

@@ -9,6 +9,8 @@ from lib.supabase_client import get_supabase
 
 app = FastAPI()
 
+PAGE_SIZE = 20
+
 
 def _mes_rango(mes: str) -> tuple[str, str]:
     year, month = int(mes[:4]), int(mes[5:7])
@@ -21,23 +23,43 @@ def _mes_rango(mes: str) -> tuple[str, str]:
 async def get_movements(request: Request):
     mes = request.query_params.get("mes", "")
     usuario = request.query_params.get("usuario", "")
+    q = request.query_params.get("q", "").strip()
+    pagina = max(1, int(request.query_params.get("pagina", "1")))
+    todos = request.query_params.get("todos", "")  # si "1", sin paginación
 
-    if not mes:
-        return JSONResponse({"error": "Falta parámetro 'mes'"}, status_code=400)
     if not usuario:
         return JSONResponse({"error": "Falta parámetro 'usuario'"}, status_code=400)
 
-    start, end = _mes_rango(mes)
     supabase = get_supabase()
-
-    response = (
+    query = (
         supabase.table("movimientos")
-        .select("id, fecha, descripcion, monto, tipo, origen, categorias(nombre, emoji)")
+        .select("id, fecha, descripcion, monto, tipo, origen, categorias(nombre, emoji)", count="exact")
         .eq("usuario_id", usuario)
-        .gte("fecha", start)
-        .lt("fecha", end)
         .order("fecha", desc=True)
-        .execute()
+        .order("id", desc=True)
     )
 
-    return JSONResponse(response.data)
+    # Filtro por mes (opcional si se hace búsqueda global)
+    if mes:
+        start, end = _mes_rango(mes)
+        query = query.gte("fecha", start).lt("fecha", end)
+
+    # Búsqueda por descripción
+    if q:
+        query = query.ilike("descripcion", f"%{q}%")
+
+    # Paginación
+    if not todos:
+        offset = (pagina - 1) * PAGE_SIZE
+        query = query.range(offset, offset + PAGE_SIZE - 1)
+
+    response = query.execute()
+    total = response.count or 0
+
+    return JSONResponse({
+        "data": response.data or [],
+        "total": total,
+        "pagina": pagina,
+        "paginas": max(1, -(-total // PAGE_SIZE)),  # ceil division
+        "page_size": PAGE_SIZE,
+    })

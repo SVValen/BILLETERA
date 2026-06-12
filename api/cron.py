@@ -4,7 +4,8 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import httpx
-from datetime import date
+import calendar
+from datetime import date, timedelta
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from lib.supabase_client import get_supabase
@@ -27,13 +28,97 @@ def _recurrente_keyboard(rec_id: int) -> dict:
     ]]}
 
 
+async def _procesar_recurrentes(hoy: date, token: str) -> int:
+    """Envía recordatorios de recurrentes que corresponden a hoy."""
+    supabase = get_supabase()
+    rows = (
+        supabase.table("recurrentes")
+        .select("*")
+        .eq("dia_del_mes", hoy.day)
+        .eq("activo", True)
+        .execute()
+    )
+    enviados = 0
+    for r in (rows.data or []):
+        ultimo = r.get("ultimo_recordatorio")
+        if ultimo and ultimo >= hoy.isoformat():
+            continue
+        chat_id = int(r["usuario_id"])
+        sufijo = {1: "ro", 2: "do", 3: "ro"}.get(hoy.day, "to")
+        await _send_telegram(
+            chat_id,
+            f"🔁 Recordatorio del {hoy.day}{sufijo} del mes:\n"
+            f"*{r['descripcion']}* — ${r['monto']:,.0f}\n¿Lo registro hoy?",
+            token,
+            reply_markup=_recurrente_keyboard(r["id"]),
+        )
+        enviados += 1
+    return enviados
+
+
+async def _enviar_resumen_semanal(hoy: date, token: str) -> int:
+    """Los lunes: resumen de la semana pasada."""
+    supabase = get_supabase()
+    inicio = hoy - timedelta(days=7)
+    fin = hoy - timedelta(days=1)
+
+    perfiles = supabase.table("perfiles").select("telegram_id").execute()
+    enviados = 0
+
+    for p in (perfiles.data or []):
+        uid = p.get("telegram_id")
+        if not uid:
+            continue
+
+        movs = (
+            supabase.table("movimientos")
+            .select("monto, tipo, categorias(nombre, emoji)")
+            .eq("usuario_id", uid)
+            .gte("fecha", inicio.isoformat())
+            .lte("fecha", fin.isoformat())
+            .execute()
+        )
+
+        rows = movs.data or []
+        if not rows:
+            continue
+
+        gastos = sum(r["monto"] for r in rows if r["tipo"] == "gasto")
+        ingresos = sum(r["monto"] for r in rows if r["tipo"] == "ingreso")
+
+        por_cat: dict = {}
+        for r in rows:
+            if r["tipo"] != "gasto":
+                continue
+            cat = r.get("categorias") or {}
+            nombre = cat.get("nombre", "Otros")
+            emoji = cat.get("emoji", "📌")
+            por_cat.setdefault(nombre, {"emoji": emoji, "monto": 0})
+            por_cat[nombre]["monto"] += r["monto"]
+
+        top = sorted(por_cat.items(), key=lambda x: x[1]["monto"], reverse=True)[:5]
+        lines = [f"📊 *Resumen {inicio.strftime('%d/%m')}–{fin.strftime('%d/%m')}*\n"]
+        for nombre, d in top:
+            lines.append(f"{d['emoji']} {nombre}: ${d['monto']:,.0f}")
+        lines += [
+            "",
+            f"💸 Gastos: *${gastos:,.0f}*",
+            f"💵 Ingresos: *${ingresos:,.0f}*",
+            f"{'✅' if ingresos >= gastos else '📉'} Saldo: *${ingresos - gastos:,.0f}*",
+        ]
+
+        await _send_telegram(int(uid), "\n".join(lines), token)
+        enviados += 1
+
+    return enviados
+
+
 @app.get("/api/cron")
 async def cron_job(request: Request):
-    # Verificar secret de Vercel cron
     cron_secret = os.environ.get("CRON_SECRET", "")
     if cron_secret:
-        auth_header = request.headers.get("authorization", "")
-        if auth_header != f"Bearer {cron_secret}":
+        auth = request.headers.get("authorization", "")
+        if auth != f"Bearer {cron_secret}":
             return JSONResponse({"error": "unauthorized"}, status_code=401)
 
     token = os.environ.get("TELEGRAM_TOKEN", "")
@@ -41,34 +126,16 @@ async def cron_job(request: Request):
         return JSONResponse({"error": "no token"}, status_code=500)
 
     hoy = date.today()
-    dia_hoy = hoy.day
-    supabase = get_supabase()
+    rec_enviados = await _procesar_recurrentes(hoy, token)
 
-    # Buscar recurrentes que corresponden a hoy y que no fueron recordados hoy
-    recurrentes = (
-        supabase.table("recurrentes")
-        .select("*")
-        .eq("dia_del_mes", dia_hoy)
-        .eq("activo", True)
-        .execute()
-    )
+    resumen_enviados = 0
+    if hoy.weekday() == 0:  # Lunes
+        resumen_enviados = await _enviar_resumen_semanal(hoy, token)
 
-    enviados = 0
-    for r in (recurrentes.data or []):
-        ultimo = r.get("ultimo_recordatorio")
-        if ultimo and ultimo >= hoy.isoformat():
-            continue  # Ya se procesó hoy
-
-        chat_id = int(r["usuario_id"])
-        sufijo = {1: "ro", 2: "do", 3: "ro"}.get(dia_hoy, "to")
-        await _send_telegram(
-            chat_id,
-            f"🔁 Recordatorio del {dia_hoy}{sufijo} del mes:\n"
-            f"*{r['descripcion']}* — ${r['monto']:,.0f}\n"
-            f"¿Lo registro hoy?",
-            token,
-            reply_markup=_recurrente_keyboard(r["id"]),
-        )
-        enviados += 1
-
-    return JSONResponse({"ok": True, "dia": dia_hoy, "recordatorios_enviados": enviados})
+    return JSONResponse({
+        "ok": True,
+        "fecha": hoy.isoformat(),
+        "lunes": hoy.weekday() == 0,
+        "recordatorios": rec_enviados,
+        "resumenes_semanales": resumen_enviados,
+    })

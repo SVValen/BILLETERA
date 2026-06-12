@@ -33,7 +33,8 @@ AYUDA = (
     "🎤 *También podés mandar un audio.*\n\n"
     "📋 *Comandos:*\n"
     "  /id — Tu Telegram ID\n"
-    "  /recurrentes — Ver gastos recurrentes\n"
+    "  /presupuesto — Estado de presupuestos\n"
+    "  /recurrentes — Gastos recurrentes\n"
     "  /ayuda — Esta ayuda"
 )
 
@@ -43,6 +44,25 @@ CAT_BUTTONS = [
     (9,  "📚 Educ."),    (11, "🐾 Mascotas"), (12, "✈️ Viajes"),  (13, "🛡️ Seguros"),
     (14, "💰 Invers."),  (15, "💳 Compras"),  (16, "✨ Belleza"), (7,  "📌 Otros"),
 ]
+
+CAT_NAME_MAP = {
+    "super": 1, "supermercado": 1, "almacen": 1,
+    "transporte": 2, "nafta": 2, "uber": 2,
+    "comida": 3, "restaurante": 3, "delivery": 3,
+    "servicios": 4, "internet": 4, "luz": 4, "gas": 4,
+    "entretenimiento": 5, "entret": 5, "netflix": 5,
+    "salud": 6, "farmacia": 6, "medico": 6,
+    "otros": 7,
+    "ropa": 8, "indumentaria": 8,
+    "educacion": 9, "educación": 9, "cursos": 9,
+    "vivienda": 10, "hogar": 10,
+    "mascotas": 11, "veterinaria": 11,
+    "viajes": 12, "turismo": 12,
+    "seguros": 13, "impuestos": 13,
+    "inversiones": 14, "ahorro": 14,
+    "compras": 15, "online": 15,
+    "belleza": 16, "gym": 16, "gimnasio": 16,
+}
 
 DOLLAR_KEYWORDS = {"dolar", "dolares", "dólares", "usd", "u$s", "us$", "dólar"}
 
@@ -130,11 +150,9 @@ async def _transcribe_voice(file_id: str, token: str) -> str | None:
         if r.status_code != 200:
             return None
         file_path = r.json()["result"]["file_path"]
-
         r = await client.get(f"https://api.telegram.org/file/bot{token}/{file_path}")
         if r.status_code != 200:
             return None
-
         r = await client.post(
             "https://api.groq.com/openai/v1/audio/transcriptions",
             headers={"Authorization": f"Bearer {groq_key}"},
@@ -156,10 +174,155 @@ async def _get_dolar_oficial() -> float | None:
     return None
 
 
+# ── Presupuesto helpers ───────────────────────────────────────────────────────
+
+def _mes_rango(mes: str) -> tuple[str, str]:
+    year, month = int(mes[:4]), int(mes[5:7])
+    start = f"{year}-{month:02d}-01"
+    end = f"{year + 1}-01-01" if month == 12 else f"{year}-{month + 1:02d}-01"
+    return start, end
+
+
+async def _check_presupuesto_alert(
+    *, usuario_id: str, categoria_id: int, chat_id: int, token: str
+) -> None:
+    if categoria_id in (7, 17):
+        return
+    mes = date.today().strftime("%Y-%m")
+    supabase = get_supabase()
+
+    pres = (
+        supabase.table("presupuestos")
+        .select("monto")
+        .eq("usuario_id", usuario_id)
+        .eq("categoria_id", categoria_id)
+        .eq("mes", mes)
+        .execute()
+    )
+    if not pres.data:
+        return
+
+    presupuestado = pres.data[0]["monto"]
+    start, end = _mes_rango(mes)
+    gastos = (
+        supabase.table("movimientos")
+        .select("monto")
+        .eq("usuario_id", usuario_id)
+        .eq("categoria_id", categoria_id)
+        .gte("fecha", start)
+        .lt("fecha", end)
+        .eq("tipo", "gasto")
+        .execute()
+    )
+    total = sum(r["monto"] for r in (gastos.data or []))
+    pct = (total / presupuestado * 100) if presupuestado else 0
+
+    if pct < 80:
+        return
+
+    cat = supabase.table("categorias").select("nombre, emoji").eq("id", categoria_id).single().execute()
+    c = cat.data or {"nombre": "?", "emoji": "📌"}
+    if pct >= 100:
+        await _send(chat_id,
+            f"🚨 Superaste el presupuesto de {c['emoji']} *{c['nombre']}*\n"
+            f"Gastado: ${total:,.0f} / Presupuesto: ${presupuestado:,.0f}",
+            token, parse_mode="Markdown")
+    else:
+        await _send(chat_id,
+            f"⚠️ {c['emoji']} *{c['nombre']}*: {pct:.0f}% del presupuesto\n"
+            f"Quedan: ${presupuestado - total:,.0f}",
+            token, parse_mode="Markdown")
+
+
+async def _handle_presupuesto_cmd(user_id: str, chat_id: int, args: str, token: str) -> None:
+    mes = date.today().strftime("%Y-%m")
+    supabase = get_supabase()
+
+    # /presupuesto comida 20000 → crear/actualizar
+    parts = args.strip().split() if args.strip() else []
+    if len(parts) >= 2:
+        cat_key = parts[0].lower()
+        try:
+            monto = float(parts[1].replace(".", "").replace(",", "."))
+        except ValueError:
+            await _send(chat_id, "Formato: `/presupuesto comida 20000`", token)
+            return
+
+        cat_id = CAT_NAME_MAP.get(cat_key)
+        if not cat_id:
+            await _send(chat_id, f"No reconozco la categoría *{parts[0]}*.\nUsá: super, comida, transporte, servicios, etc.", token)
+            return
+
+        existing = (
+            supabase.table("presupuestos")
+            .select("id")
+            .eq("usuario_id", user_id)
+            .eq("categoria_id", cat_id)
+            .eq("mes", mes)
+            .execute()
+        )
+        if existing.data:
+            supabase.table("presupuestos").update({"monto": monto}).eq("id", existing.data[0]["id"]).execute()
+        else:
+            supabase.table("presupuestos").insert({
+                "usuario_id": user_id, "categoria_id": cat_id, "monto": monto, "mes": mes
+            }).execute()
+
+        cat_row = supabase.table("categorias").select("nombre, emoji").eq("id", cat_id).single().execute()
+        c = cat_row.data or {"nombre": "?", "emoji": "📌"}
+        await _send(chat_id, f"✅ Presupuesto *{c['emoji']} {c['nombre']}*: ${monto:,.0f} para {mes}", token)
+        return
+
+    # /presupuesto → mostrar estado
+    pres_rows = (
+        supabase.table("presupuestos")
+        .select("categoria_id, monto, categorias(nombre, emoji)")
+        .eq("usuario_id", user_id)
+        .eq("mes", mes)
+        .execute()
+    )
+
+    if not pres_rows.data:
+        await _send(chat_id,
+            f"No tenés presupuestos para {mes}.\n\n"
+            "Configurá uno con:\n`/presupuesto comida 20000`", token)
+        return
+
+    start, end = _mes_rango(mes)
+    mov_rows = (
+        supabase.table("movimientos")
+        .select("categoria_id, monto")
+        .eq("usuario_id", user_id)
+        .eq("tipo", "gasto")
+        .gte("fecha", start)
+        .lt("fecha", end)
+        .execute()
+    )
+    gastos_por_cat: dict[int, float] = {}
+    for r in (mov_rows.data or []):
+        cid = r["categoria_id"]
+        gastos_por_cat[cid] = gastos_por_cat.get(cid, 0) + r["monto"]
+
+    mes_nombre = date(int(mes[:4]), int(mes[5:7]), 1).strftime("%B %Y")
+    lines = [f"💰 *Presupuestos {mes_nombre}*\n"]
+    for p in sorted(pres_rows.data, key=lambda x: -(gastos_por_cat.get(x["categoria_id"], 0) / x["monto"])):
+        cat = p.get("categorias") or {}
+        cid = p["categoria_id"]
+        presup = p["monto"]
+        gasto = gastos_por_cat.get(cid, 0)
+        pct = gasto / presup * 100 if presup else 0
+        barra = "▓" * int(min(pct, 100) / 10) + "░" * (10 - int(min(pct, 100) / 10))
+        estado = " 🚨" if pct >= 100 else " ⚠️" if pct >= 80 else ""
+        lines.append(
+            f"{cat.get('emoji','📌')} *{cat.get('nombre','?')}*{estado}\n"
+            f"{barra} {pct:.0f}%  ${gasto:,.0f} / ${presup:,.0f}"
+        )
+    await _send(chat_id, "\n\n".join(lines), token)
+
+
 # ── Helpers de fecha ──────────────────────────────────────────────────────────
 
 def _add_months(d: date, months: int) -> date:
-    """Suma N meses a una fecha, ajustando el día si el mes destino es más corto."""
     month = d.month - 1 + months
     year = d.year + month // 12
     month = month % 12 + 1
@@ -179,7 +342,6 @@ async def _create_cuota_movimientos(plan_id: int, primer_fecha: date, token: str
     if not plan.data:
         return
     p = plan.data
-
     movimientos = [
         {
             "usuario_id": p["usuario_id"],
@@ -195,7 +357,7 @@ async def _create_cuota_movimientos(plan_id: int, primer_fecha: date, token: str
     ]
     supabase.table("movimientos").insert(movimientos).execute()
     supabase.table("cuotas_plan").update(
-        {"fecha_primera_cuota": primer_fecha.isoformat(), "activo": True}
+        {"fecha_primera_cuota": primer_fecha.isoformat()}
     ).eq("id", plan_id).execute()
 
     chat_id = int(p["usuario_id"])
@@ -228,10 +390,7 @@ async def _save_and_confirm(
     nota_monto_bajo: bool = False,
     fecha: str | None = None,
 ) -> None:
-    if tipo == "ingreso":
-        categoria_id = 17
-    else:
-        categoria_id = categorize_from_keywords(descripcion)
+    categoria_id = 17 if tipo == "ingreso" else categorize_from_keywords(descripcion)
 
     supabase = get_supabase()
     result = supabase.table("movimientos").insert({
@@ -269,20 +428,18 @@ async def _save_and_confirm(
     cat_name = cat_row.data.get("nombre", "Otros") if cat_row.data else "Otros"
     cat_emoji = cat_row.data.get("emoji", "📌") if cat_row.data else "📌"
     signo = "-" if tipo == "gasto" else "+"
-    await _send(
-        chat_id,
-        f"✅ Registrado: {signo}${monto:,.0f} · {cat_emoji} {cat_name}",
-        token,
-        parse_mode="",
-    )
+    await _send(chat_id, f"✅ Registrado: {signo}${monto:,.0f} · {cat_emoji} {cat_name}", token, parse_mode="")
+
+    if tipo == "gasto" and categoria_id not in (7, 17):
+        await _check_presupuesto_alert(
+            usuario_id=user_id, categoria_id=categoria_id, chat_id=chat_id, token=token
+        )
 
 
 async def _process_text(text: str, user_id: str, chat_id: int, token: str) -> None:
-    # ── Detección especial ──
     dia_mes = parse_recurrente(text)
     num_cuotas = parse_cuotas(text)
 
-    # Limpiar el texto antes de parsear monto/descripción
     if dia_mes:
         clean = strip_recurrente(text)
     elif num_cuotas:
@@ -299,7 +456,7 @@ async def _process_text(text: str, user_id: str, chat_id: int, token: str) -> No
     descripcion = parsed["descripcion"]
     tipo = parsed["tipo"]
 
-    # ── Gasto recurrente ──────────────────────────────────────────────────────
+    # ── Gasto recurrente ──
     if dia_mes and tipo == "gasto":
         categoria_id = categorize_from_keywords(descripcion)
         supabase = get_supabase()
@@ -312,18 +469,13 @@ async def _process_text(text: str, user_id: str, chat_id: int, token: str) -> No
             "dia_del_mes": dia_mes,
             "activo": True,
         }).execute()
-        rec_id = result.data[0]["id"] if result.data else "?"
         sufijo = {1: "ro", 2: "do", 3: "ro"}.get(dia_mes, "to")
-        await _send(
-            chat_id,
-            f"🔁 Recordatorio configurado:\n"
-            f"*{descripcion}* — ${monto:,.0f} — todos los *{dia_mes}{sufijo}* del mes\n\n"
-            f"Voy a preguntarte cada mes si querés registrarlo.",
-            token,
-        )
+        await _send(chat_id,
+            f"🔁 Recordatorio configurado:\n*{descripcion}* — ${monto:,.0f} — todos los *{dia_mes}{sufijo}* del mes",
+            token)
         return
 
-    # ── Compra en cuotas ──────────────────────────────────────────────────────
+    # ── Compra en cuotas ──
     if num_cuotas and tipo == "gasto":
         monto_cuota = round(monto / num_cuotas, 2)
         categoria_id = categorize_from_keywords(descripcion)
@@ -338,31 +490,24 @@ async def _process_text(text: str, user_id: str, chat_id: int, token: str) -> No
         }).execute()
         plan_id = result.data[0]["id"] if result.data else None
         if not plan_id:
-            await _send(chat_id, "Error guardando el plan de cuotas 😕", token, parse_mode="")
+            await _send(chat_id, "Error guardando el plan 😕", token, parse_mode="")
             return
-        await _send(
-            chat_id,
-            f"💳 *{descripcion}* en {num_cuotas} cuotas de *${monto_cuota:,.0f}*\n"
-            f"¿Cuándo se paga la primera cuota?",
-            token,
-            reply_markup=_cuota_fecha_keyboard(plan_id),
-        )
+        await _send(chat_id,
+            f"💳 *{descripcion}* en {num_cuotas} cuotas de *${monto_cuota:,.0f}*\n¿Primera cuota?",
+            token, reply_markup=_cuota_fecha_keyboard(plan_id))
         return
 
-    # ── Flujo normal ──────────────────────────────────────────────────────────
+    # ── Flujo normal ──
     moneda = _detect_currency(text)
-
     if moneda == "USD":
         tasa = await _get_dolar_oficial()
         if not tasa:
-            await _send(chat_id, "No pude obtener el tipo de cambio oficial 😕 Intentá de nuevo.", token, parse_mode="")
+            await _send(chat_id, "No pude obtener el tipo de cambio 😕 Intentá de nuevo.", token, parse_mode="")
             return
         monto_ars = round(monto * tasa)
         descripcion = f"{descripcion} (USD {monto:,.0f} @ ${tasa:,.0f} oficial)"
-        await _save_and_confirm(
-            chat_id=chat_id, token=token, user_id=user_id,
-            descripcion=descripcion, monto=monto_ars, tipo=tipo,
-        )
+        await _save_and_confirm(chat_id=chat_id, token=token, user_id=user_id,
+                                descripcion=descripcion, monto=monto_ars, tipo=tipo)
         return
 
     monto_bajo = monto < 1000
@@ -381,7 +526,7 @@ async def telegram_webhook(request: Request):
     data = await request.json()
     token = os.environ.get("TELEGRAM_TOKEN", "")
 
-    # ── Callbacks de botones ──────────────────────────────────────────────────
+    # ── Callbacks ─────────────────────────────────────────────────────────────
     if "callback_query" in data:
         cq = data["callback_query"]
         callback_id = cq["id"]
@@ -389,10 +534,8 @@ async def telegram_webhook(request: Request):
         chat_id = cq["message"]["chat"]["id"]
         message_id = cq["message"]["message_id"]
         supabase = get_supabase()
-
         parts = payload.split(":")
 
-        # Selección de categoría
         if parts[0] == "cat" and len(parts) == 3:
             movement_id, cat_id = int(parts[1]), int(parts[2])
             supabase.table("movimientos").update(
@@ -401,29 +544,34 @@ async def telegram_webhook(request: Request):
             cat_row = supabase.table("categorias").select("nombre, emoji").eq("id", cat_id).single().execute()
             cat_name = cat_row.data.get("nombre", "?") if cat_row.data else "?"
             cat_emoji = cat_row.data.get("emoji", "📌") if cat_row.data else "📌"
+            mov = supabase.table("movimientos").select("usuario_id").eq("id", movement_id).single().execute()
             if token:
                 await _answer_callback(callback_id, token)
                 await _edit_message(chat_id, message_id, f"✅ Guardado como {cat_emoji} {cat_name}", token)
+            if mov.data and token:
+                await _check_presupuesto_alert(
+                    usuario_id=mov.data["usuario_id"], categoria_id=cat_id, chat_id=chat_id, token=token
+                )
 
-        # Monto confirmado tal cual
         elif parts[0] == "monto_ok" and len(parts) == 2:
             movement_id = int(parts[1])
             supabase.table("movimientos").update({"estado": "confirmado"}).eq("id", movement_id).execute()
-            row = supabase.table("movimientos").select("monto, categorias(nombre, emoji)").eq("id", movement_id).single().execute()
+            row = supabase.table("movimientos").select("monto, usuario_id, categoria_id, categorias(nombre, emoji)").eq("id", movement_id).single().execute()
             monto = row.data["monto"] if row.data else 0
             cat = (row.data.get("categorias") or {}) if row.data else {}
             if token:
                 await _answer_callback(callback_id, token)
-                await _edit_message(
-                    chat_id, message_id,
-                    f"✅ Guardado: -${monto:,.0f} · {cat.get('emoji','📌')} {cat.get('nombre','?')}",
-                    token,
+                await _edit_message(chat_id, message_id,
+                    f"✅ Guardado: -${monto:,.0f} · {cat.get('emoji','📌')} {cat.get('nombre','?')}", token)
+            if row.data and token:
+                await _check_presupuesto_alert(
+                    usuario_id=row.data["usuario_id"], categoria_id=row.data["categoria_id"],
+                    chat_id=chat_id, token=token
                 )
 
-        # Monto × 1000
         elif parts[0] == "monto_x1000" and len(parts) == 2:
             movement_id = int(parts[1])
-            row = supabase.table("movimientos").select("monto, tipo, descripcion, categorias(nombre, emoji)").eq("id", movement_id).single().execute()
+            row = supabase.table("movimientos").select("monto, tipo, descripcion, usuario_id, categorias(nombre, emoji)").eq("id", movement_id).single().execute()
             if row.data:
                 nuevo_monto = row.data["monto"] * 1000
                 tipo = row.data["tipo"]
@@ -443,16 +591,16 @@ async def telegram_webhook(request: Request):
                         await _send(chat_id, f"¿En qué categoría va *{descripcion}*?", token,
                                     reply_markup=_category_keyboard(movement_id))
                     else:
-                        await _edit_message(
-                            chat_id, message_id,
-                            f"✅ Guardado: -${nuevo_monto:,.0f} · {cat.get('emoji','📌')} {cat.get('nombre','?')}",
-                            token,
+                        await _edit_message(chat_id, message_id,
+                            f"✅ Guardado: -${nuevo_monto:,.0f} · {cat.get('emoji','📌')} {cat.get('nombre','?')}", token)
+                    if tipo == "gasto" and categoria_id not in (7, 17) and token:
+                        await _check_presupuesto_alert(
+                            usuario_id=row.data["usuario_id"], categoria_id=categoria_id,
+                            chat_id=chat_id, token=token
                         )
 
-        # Primera cuota: este mes o próximo
         elif parts[0] == "cuota_fecha" and len(parts) == 3:
-            plan_id = int(parts[1])
-            proximo = int(parts[2])  # 0 = este mes, 1 = próximo mes
+            plan_id, proximo = int(parts[1]), int(parts[2])
             hoy = date.today()
             primer_fecha = _first_of_month(_add_months(hoy, proximo))
             if token:
@@ -461,7 +609,6 @@ async def telegram_webhook(request: Request):
                     f"📅 Primera cuota: {primer_fecha.strftime('%d/%m/%Y')} — creando movimientos...", token)
                 await _create_cuota_movimientos(plan_id, primer_fecha, token)
 
-        # Recordatorio recurrente — confirmar registro
         elif parts[0] == "recurrente_si" and len(parts) == 2:
             rec_id = int(parts[1])
             rec = supabase.table("recurrentes").select("*").eq("id", rec_id).single().execute()
@@ -484,8 +631,12 @@ async def telegram_webhook(request: Request):
                     await _answer_callback(callback_id, token)
                     await _edit_message(chat_id, message_id,
                         f"✅ Registrado: -{r['descripcion']} ${r['monto']:,.0f}", token)
+                if token:
+                    await _check_presupuesto_alert(
+                        usuario_id=r["usuario_id"], categoria_id=r["categoria_id"],
+                        chat_id=chat_id, token=token
+                    )
 
-        # Recordatorio recurrente — saltar hoy
         elif parts[0] == "recurrente_no" and len(parts) == 2:
             rec_id = int(parts[1])
             supabase.table("recurrentes").update(
@@ -497,7 +648,7 @@ async def telegram_webhook(request: Request):
 
         return JSONResponse({"ok": True})
 
-    # ── Mensajes ──────────────────────────────────────────────────────────────
+    # ── Mensajes ───────────────────────────────────────────────────────────────
     if "message" not in data:
         return JSONResponse({"ok": True})
 
@@ -505,7 +656,6 @@ async def telegram_webhook(request: Request):
     user_id = str(message["from"]["id"])
     chat_id = message["chat"]["id"]
 
-    # Voz / audio
     if "voice" in message or "audio" in message:
         if not token:
             return JSONResponse({"ok": True})
@@ -518,13 +668,12 @@ async def telegram_webhook(request: Request):
         await _send(chat_id, "🎤 Transcribiendo...", token, parse_mode="")
         transcribed = await _transcribe_voice(file_id, token)
         if not transcribed:
-            await _send(chat_id, "No pude entender el audio, intentá de nuevo 🙁", token, parse_mode="")
+            await _send(chat_id, "No pude entender el audio 🙁", token, parse_mode="")
             return JSONResponse({"ok": True})
         await _send(chat_id, f'🗣 _"{transcribed}"_', token)
         await _process_text(transcribed, user_id, chat_id, token)
         return JSONResponse({"ok": True})
 
-    # Texto
     text = message.get("text", "").strip()
     if not text:
         return JSONResponse({"ok": True})
@@ -532,8 +681,8 @@ async def telegram_webhook(request: Request):
     if text.startswith("/id"):
         if token:
             await _send(chat_id,
-                        f"🪪 Tu Telegram ID es: `{user_id}`\n"
-                        "Usalo en *Configurar* del dashboard para vincular tu cuenta.", token)
+                f"🪪 Tu Telegram ID es: `{user_id}`\n"
+                "Usalo en *Configurar* del dashboard para vincular tu cuenta.", token)
         return JSONResponse({"ok": True})
 
     if text.lower().startswith(("/ayuda", "/start", "/help")):
@@ -552,6 +701,12 @@ async def telegram_webhook(request: Request):
                 for r in rows.data:
                     lines.append(f"• {r['descripcion']} — ${r['monto']:,.0f} — día {r['dia_del_mes']}")
                 await _send(chat_id, "\n".join(lines), token)
+        return JSONResponse({"ok": True})
+
+    if text.lower().startswith("/presupuesto"):
+        if token:
+            args = text[len("/presupuesto"):].strip()
+            await _handle_presupuesto_cmd(user_id, chat_id, args, token)
         return JSONResponse({"ok": True})
 
     if token:
