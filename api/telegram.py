@@ -19,15 +19,14 @@ AYUDA = (
     "  `gasté 3000 en nafta`\n\n"
     "*Ingresos* — palabra primero:\n"
     "  `sueldo 80000`\n"
-    "  `salario 80000`\n"
     "  `ingreso 50000 freelance`\n\n"
+    "🎤 *También podés mandar un audio:*\n"
+    '  _"gasté cinco mil en el super"_\n\n'
     "📋 *Comandos:*\n"
     "  /id — Tu Telegram ID (para el dashboard)\n"
     "  /ayuda — Esta ayuda"
 )
 
-# Categorías disponibles para el teclado inline
-# (cat_id, label) — 4 por fila
 CAT_BUTTONS = [
     (1,  "🛒 Super"),    (3,  "🍽️ Comida"),  (2,  "🚗 Trans."),  (4,  "💡 Servicios"),
     (5,  "🎬 Entret."),  (6,  "🏥 Salud"),   (8,  "👕 Ropa"),    (10, "🏠 Vivienda"),
@@ -80,6 +79,93 @@ async def _edit_message(chat_id: int, message_id: int, text: str, token: str) ->
         )
 
 
+async def _transcribe_voice(file_id: str, token: str) -> str | None:
+    """Descarga el audio de Telegram y lo transcribe con Groq Whisper (gratis)."""
+    import httpx
+
+    groq_key = os.environ.get("GROQ_API_KEY", "")
+    if not groq_key:
+        return None
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        # 1. Obtener path del archivo en los servidores de Telegram
+        r = await client.get(
+            f"https://api.telegram.org/bot{token}/getFile",
+            params={"file_id": file_id},
+        )
+        if r.status_code != 200:
+            return None
+        file_path = r.json()["result"]["file_path"]
+
+        # 2. Descargar el OGG
+        r = await client.get(
+            f"https://api.telegram.org/file/bot{token}/{file_path}"
+        )
+        if r.status_code != 200:
+            return None
+        audio_bytes = r.content
+
+        # 3. Transcribir con Groq Whisper
+        r = await client.post(
+            "https://api.groq.com/openai/v1/audio/transcriptions",
+            headers={"Authorization": f"Bearer {groq_key}"},
+            files={"file": ("audio.ogg", audio_bytes, "audio/ogg")},
+            data={"model": "whisper-large-v3-turbo", "language": "es"},
+        )
+        if r.status_code != 200:
+            return None
+
+        return r.json().get("text", "").strip() or None
+
+
+async def _process_text(text: str, user_id: str, chat_id: int, token: str) -> None:
+    """Lógica compartida entre mensajes de texto y audios transcriptos."""
+    parsed = parse_movement(text)
+    if not parsed:
+        await _send(chat_id, "No entendí 🤔\n\n" + AYUDA, token)
+        return
+
+    if parsed["tipo"] == "ingreso":
+        categoria_id = 17
+    else:
+        categoria_id = categorize_from_keywords(parsed["descripcion"])
+
+    supabase = get_supabase()
+    result = supabase.table("movimientos").insert({
+        "usuario_id": user_id,
+        "fecha": date.today().isoformat(),
+        "descripcion": parsed["descripcion"],
+        "monto": parsed["monto"],
+        "categoria_id": categoria_id,
+        "tipo": parsed["tipo"],
+        "origen": "telegram",
+        "estado": "confirmado" if categoria_id != 7 else "pendiente_categoria",
+    }).execute()
+
+    movement_id = result.data[0]["id"] if result.data else None
+
+    if categoria_id == 7 and parsed["tipo"] == "gasto" and movement_id:
+        await _send(
+            chat_id,
+            f"📌 Guardé *${parsed['monto']:,.0f}* — ¿en qué categoría va *{parsed['descripcion']}*?",
+            token,
+            reply_markup=_category_keyboard(movement_id),
+        )
+        return
+
+    cat_row = supabase.table("categorias").select("nombre, emoji").eq("id", categoria_id).single().execute()
+    cat_name = cat_row.data.get("nombre", "Otros") if cat_row.data else "Otros"
+    cat_emoji = cat_row.data.get("emoji", "📌") if cat_row.data else "📌"
+
+    signo = "-" if parsed["tipo"] == "gasto" else "+"
+    await _send(
+        chat_id,
+        f"✅ Registrado: {signo}${parsed['monto']:,.0f} · {cat_emoji} {cat_name}",
+        token,
+        parse_mode="",
+    )
+
+
 @app.post("/api/telegram")
 async def telegram_webhook(request: Request):
     data = await request.json()
@@ -117,19 +203,44 @@ async def telegram_webhook(request: Request):
 
         return JSONResponse({"ok": True})
 
-    # ── Mensaje de texto ──────────────────────────────────────
+    # ── Mensajes ──────────────────────────────────────────────
     if "message" not in data:
         return JSONResponse({"ok": True})
 
     message = data["message"]
-    text = message.get("text", "").strip()
     user_id = str(message["from"]["id"])
     chat_id = message["chat"]["id"]
 
+    # ── Mensaje de voz 🎤 ──
+    if "voice" in message or "audio" in message:
+        if not token:
+            return JSONResponse({"ok": True})
+
+        file_id = message.get("voice", message.get("audio", {})).get("file_id")
+        if not file_id:
+            return JSONResponse({"ok": True})
+
+        groq_key = os.environ.get("GROQ_API_KEY", "")
+        if not groq_key:
+            await _send(chat_id, "🎤 Los audios no están configurados aún (falta GROQ_API_KEY).", token)
+            return JSONResponse({"ok": True})
+
+        await _send(chat_id, "🎤 Transcribiendo...", token, parse_mode="")
+        transcribed = await _transcribe_voice(file_id, token)
+
+        if not transcribed:
+            await _send(chat_id, "No pude entender el audio, intentá de nuevo 🙁", token, parse_mode="")
+            return JSONResponse({"ok": True})
+
+        await _send(chat_id, f'🗣 _"{transcribed}"_', token)
+        await _process_text(transcribed, user_id, chat_id, token)
+        return JSONResponse({"ok": True})
+
+    # ── Mensaje de texto ──
+    text = message.get("text", "").strip()
     if not text:
         return JSONResponse({"ok": True})
 
-    # Comandos
     if text.startswith("/id"):
         if token:
             await _send(chat_id,
@@ -143,56 +254,7 @@ async def telegram_webhook(request: Request):
             await _send(chat_id, AYUDA, token)
         return JSONResponse({"ok": True})
 
-    # Parsear movimiento
-    parsed = parse_movement(text)
-    if not parsed:
-        if token:
-            await _send(chat_id, "No entendí 🤔\n\n" + AYUDA, token)
-        return JSONResponse({"ok": False})
+    if token:
+        await _process_text(text, user_id, chat_id, token)
 
-    # Categorizar
-    if parsed["tipo"] == "ingreso":
-        categoria_id = 17  # Ingresos
-    else:
-        categoria_id = categorize_from_keywords(parsed["descripcion"])
-
-    supabase = get_supabase()
-    result = supabase.table("movimientos").insert({
-        "usuario_id": user_id,
-        "fecha": date.today().isoformat(),
-        "descripcion": parsed["descripcion"],
-        "monto": parsed["monto"],
-        "categoria_id": categoria_id,
-        "tipo": parsed["tipo"],
-        "origen": "telegram",
-        "estado": "confirmado" if categoria_id != 7 else "pendiente_categoria",
-    }).execute()
-
-    if not token:
-        return JSONResponse({"ok": True})
-
-    movement_id = result.data[0]["id"] if result.data else None
-
-    # Si quedó en Otros y es un gasto, preguntar la categoría
-    if categoria_id == 7 and parsed["tipo"] == "gasto" and movement_id:
-        await _send(
-            chat_id,
-            f"📌 Guardé *${parsed['monto']:,.0f}* — ¿en qué categoría va *{parsed['descripcion']}*?",
-            token,
-            reply_markup=_category_keyboard(movement_id),
-        )
-        return JSONResponse({"ok": True})
-
-    # Confirmación normal
-    cat_row = supabase.table("categorias").select("nombre, emoji").eq("id", categoria_id).single().execute()
-    cat_name = cat_row.data.get("nombre", "Otros") if cat_row.data else "Otros"
-    cat_emoji = cat_row.data.get("emoji", "📌") if cat_row.data else "📌"
-
-    signo = "-" if parsed["tipo"] == "gasto" else "+"
-    await _send(
-        chat_id,
-        f"✅ Registrado: {signo}${parsed['monto']:,.0f} · {cat_emoji} {cat_name}",
-        token,
-        parse_mode="",
-    )
     return JSONResponse({"ok": True})
