@@ -16,6 +16,27 @@ interface Movement {
   categorias: { nombre: string; emoji: string } | null
 }
 
+const CATEGORIAS = [
+  { id: 1,  emoji: '🛒', nombre: 'Supermercado' },
+  { id: 2,  emoji: '🚗', nombre: 'Transporte' },
+  { id: 3,  emoji: '🍽️', nombre: 'Comida' },
+  { id: 4,  emoji: '💡', nombre: 'Servicios' },
+  { id: 5,  emoji: '🎬', nombre: 'Entretenimiento' },
+  { id: 6,  emoji: '🏥', nombre: 'Salud' },
+  { id: 7,  emoji: '📌', nombre: 'Otros' },
+  { id: 8,  emoji: '👕', nombre: 'Ropa' },
+  { id: 9,  emoji: '📚', nombre: 'Educación' },
+  { id: 10, emoji: '🏠', nombre: 'Vivienda' },
+  { id: 11, emoji: '🐾', nombre: 'Mascotas' },
+  { id: 12, emoji: '✈️', nombre: 'Viajes' },
+  { id: 13, emoji: '🛡️', nombre: 'Seguros' },
+  { id: 14, emoji: '💰', nombre: 'Inversiones' },
+  { id: 15, emoji: '💳', nombre: 'Compras Online' },
+  { id: 16, emoji: '✨', nombre: 'Belleza' },
+  { id: 17, emoji: '💵', nombre: 'Ingresos' },
+  { id: 18, emoji: '📱', nombre: 'Suscripciones' },
+]
+
 export default function MovimientosTab({ telegramId, mes }: { telegramId: string; mes: string }) {
   const [movements, setMovements] = useState<Movement[]>([])
   const [loading, setLoading] = useState(true)
@@ -25,6 +46,7 @@ export default function MovimientosTab({ telegramId, mes }: { telegramId: string
   const [q, setQ] = useState('')
   const [qInput, setQInput] = useState('')
   const [filtroTipo, setFiltroTipo] = useState<'todos' | 'gasto' | 'ingreso'>('todos')
+  const [filtroCategoria, setFiltroCategoria] = useState('')
 
   const fetch_ = useCallback(async () => {
     setLoading(true)
@@ -34,19 +56,19 @@ export default function MovimientosTab({ telegramId, mes }: { telegramId: string
       pagina: String(pagina),
     })
     if (q) params.set('q', q)
+    if (filtroTipo !== 'todos') params.set('tipo', filtroTipo)
+    if (filtroCategoria) params.set('categoria_id', filtroCategoria)
     const r = await fetch(`/api/movements?${params}`)
     const data = await r.json()
-    let rows: Movement[] = data.data || []
-    if (filtroTipo !== 'todos') rows = rows.filter(m => m.tipo === filtroTipo)
-    setMovements(rows)
+    setMovements(data.data || [])
     setTotal(data.total || 0)
     setPaginas(data.paginas || 1)
     setLoading(false)
-  }, [telegramId, mes, pagina, q, filtroTipo])
+  }, [telegramId, mes, pagina, q, filtroTipo, filtroCategoria])
 
   useEffect(() => {
     setPagina(1)
-  }, [mes, q, filtroTipo])
+  }, [mes, q, filtroTipo, filtroCategoria])
 
   useEffect(() => { fetch_() }, [fetch_])
 
@@ -75,13 +97,25 @@ export default function MovimientosTab({ telegramId, mes }: { telegramId: string
           <button className="btn-primary" onClick={buscar}>Buscar</button>
           {q && <button className="btn-ghost" onClick={() => { setQ(''); setQInput('') }}>✕ Limpiar</button>}
         </div>
-        <div className="tipo-filter">
-          {(['todos', 'gasto', 'ingreso'] as const).map(t => (
-            <button key={t} className={`filter-btn ${filtroTipo === t ? 'active' : ''}`}
-              onClick={() => setFiltroTipo(t)}>
-              {t === 'todos' ? 'Todos' : t === 'gasto' ? 'Gastos' : 'Ingresos'}
-            </button>
-          ))}
+        <div className="filtros-row">
+          <div className="tipo-filter">
+            {(['todos', 'gasto', 'ingreso'] as const).map(t => (
+              <button key={t} className={`filter-btn ${filtroTipo === t ? 'active' : ''}`}
+                onClick={() => setFiltroTipo(t)}>
+                {t === 'todos' ? 'Todos' : t === 'gasto' ? 'Gastos' : 'Ingresos'}
+              </button>
+            ))}
+          </div>
+          <select
+            className="cat-select"
+            value={filtroCategoria}
+            onChange={e => setFiltroCategoria(e.target.value)}
+          >
+            <option value="">Todas las categorías</option>
+            {CATEGORIAS.map(c => (
+              <option key={c.id} value={String(c.id)}>{c.emoji} {c.nombre}</option>
+            ))}
+          </select>
         </div>
       </div>
 

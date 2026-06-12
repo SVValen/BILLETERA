@@ -26,6 +26,8 @@ async def get_movements(request: Request):
     q = request.query_params.get("q", "").strip()
     pagina = max(1, int(request.query_params.get("pagina", "1")))
     todos = request.query_params.get("todos", "")  # si "1", sin paginación
+    tipo = request.query_params.get("tipo", "").strip()
+    categoria_id = request.query_params.get("categoria_id", "").strip()
 
     if not usuario:
         return JSONResponse({"error": "Falta parámetro 'usuario'"}, status_code=400)
@@ -47,6 +49,17 @@ async def get_movements(request: Request):
     # Búsqueda por descripción
     if q:
         query = query.ilike("descripcion", f"%{q}%")
+
+    # Filtro por tipo (gasto/ingreso)
+    if tipo in ("gasto", "ingreso"):
+        query = query.eq("tipo", tipo)
+
+    # Filtro por categoría
+    if categoria_id:
+        try:
+            query = query.eq("categoria_id", int(categoria_id))
+        except ValueError:
+            pass
 
     # Paginación
     if not todos:

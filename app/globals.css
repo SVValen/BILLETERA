@@ -298,7 +298,21 @@ body {
 .filtros { margin-bottom: 16px; display: flex; flex-direction: column; gap: 10px; }
 .search-row { display: flex; gap: 8px; }
 .search-input { flex: 1; }
+.filtros-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .tipo-filter { display: flex; gap: 6px; }
+.cat-select {
+  border: 1px solid var(--border2);
+  border-radius: 20px;
+  padding: 5px 12px;
+  font-size: 13px;
+  background: var(--bg3);
+  color: var(--fg2);
+  cursor: pointer;
+  outline: none;
+  transition: border-color .15s;
+  max-width: 200px;
+}
+.cat-select:focus { border-color: var(--primary); color: var(--fg); }
 .filter-btn {
   background: var(--bg3);
   border: 1px solid var(--border2);
