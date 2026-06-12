@@ -458,6 +458,18 @@ async def _process_text(text: str, user_id: str, chat_id: int, token: str) -> No
 
     # ── Gasto recurrente ──
     if dia_mes and tipo == "gasto":
+        # Conversión USD si corresponde
+        moneda = _detect_currency(text)
+        if moneda == "USD":
+            tasa = await _get_dolar_oficial()
+            if not tasa:
+                await _send(chat_id, "No pude obtener el tipo de cambio 😕 Intentá de nuevo.", token, parse_mode="")
+                return
+            # Limpiar "usd"/"dolar" del inicio de la descripción
+            desc_limpia = re.sub(r"^(?:usd|dolar|dólares?)\s+", "", descripcion, flags=re.IGNORECASE).strip()
+            monto = round(monto * tasa)
+            descripcion = f"{desc_limpia} (USD @ ${tasa:,.0f} oficial)"
+
         categoria_id = categorize_from_keywords(descripcion)
         supabase = get_supabase()
         result = supabase.table("recurrentes").insert({
@@ -477,6 +489,16 @@ async def _process_text(text: str, user_id: str, chat_id: int, token: str) -> No
 
     # ── Compra en cuotas ──
     if num_cuotas and tipo == "gasto":
+        moneda = _detect_currency(text)
+        if moneda == "USD":
+            tasa = await _get_dolar_oficial()
+            if not tasa:
+                await _send(chat_id, "No pude obtener el tipo de cambio 😕 Intentá de nuevo.", token, parse_mode="")
+                return
+            desc_limpia = re.sub(r"^(?:usd|dolar|dólares?)\s+", "", descripcion, flags=re.IGNORECASE).strip()
+            monto = round(monto * tasa)
+            descripcion = f"{desc_limpia} (USD @ ${tasa:,.0f} oficial)"
+
         monto_cuota = round(monto / num_cuotas, 2)
         categoria_id = categorize_from_keywords(descripcion)
         supabase = get_supabase()
