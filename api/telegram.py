@@ -876,11 +876,22 @@ async def telegram_webhook(request: Request):
 
     if text.lower().startswith("/editar"):
         if token:
-            kb, _ = await _recent_movements_keyboard(user_id, "edit")
-            if kb:
-                await _send(chat_id, "✏️ ¿Qué movimiento querés editar?", token, reply_markup=kb)
+            q = text[len("/editar"):].strip()
+            mes_actual = date.today().strftime("%Y-%m")
+            if q:
+                kb, total = await _recent_movements_keyboard(user_id, "edit", q=q, mes=mes_actual)
+                if kb:
+                    await _send(chat_id,
+                        f"✏️ *{total}* movimiento{'s' if total != 1 else ''} con \"{q}\" en {mes_actual}:",
+                        token, reply_markup=kb)
+                else:
+                    await _send(chat_id, f"No encontré movimientos con \"{q}\" este mes.", token, parse_mode="")
             else:
-                await _send(chat_id, "No encontré movimientos recientes.", token, parse_mode="")
+                kb, _ = await _recent_movements_keyboard(user_id, "edit")
+                if kb:
+                    await _send(chat_id, "✏️ ¿Qué movimiento querés editar?", token, reply_markup=kb)
+                else:
+                    await _send(chat_id, "No encontré movimientos recientes.", token, parse_mode="")
         return JSONResponse({"ok": True})
 
     if text.lower().startswith("/borrar"):
