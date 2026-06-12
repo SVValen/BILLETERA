@@ -33,6 +33,8 @@ AYUDA = (
     "🎤 *También podés mandar un audio.*\n\n"
     "📋 *Comandos:*\n"
     "  /id — Tu Telegram ID\n"
+    "  /editar — Editar un movimiento reciente\n"
+    "  /borrar — Borrar un movimiento reciente\n"
     "  /presupuesto — Estado de presupuestos\n"
     "  /recurrentes — Gastos recurrentes\n"
     "  /ayuda — Esta ayuda"
@@ -100,6 +102,47 @@ def _recurrente_keyboard(rec_id: int) -> dict:
         {"text": "✓ Sí, registrar", "callback_data": f"recurrente_si:{rec_id}"},
         {"text": "✗ No hoy", "callback_data": f"recurrente_no:{rec_id}"},
     ]]}
+
+
+def _edit_submenu_keyboard(movement_id: int) -> dict:
+    return {"inline_keyboard": [[
+        {"text": "💰 Editar monto", "callback_data": f"edit_monto:{movement_id}"},
+        {"text": "📂 Cambiar categoría", "callback_data": f"edit_cat:{movement_id}"},
+        {"text": "🗑️ Borrar", "callback_data": f"del:{movement_id}"},
+    ]]}
+
+
+def _del_confirm_keyboard(movement_id: int) -> dict:
+    return {"inline_keyboard": [[
+        {"text": "✓ Sí, borrar", "callback_data": f"del_ok:{movement_id}"},
+        {"text": "✗ Cancelar", "callback_data": f"del_no:{movement_id}"},
+    ]]}
+
+
+async def _recent_movements_keyboard(user_id: str, action: str, limit: int = 8) -> dict | None:
+    """Lista de botones con los últimos movimientos. action: 'edit' o 'del'."""
+    supabase = get_supabase()
+    rows = (
+        supabase.table("movimientos")
+        .select("id, fecha, descripcion, monto, tipo, categorias(emoji)")
+        .eq("usuario_id", user_id)
+        .order("fecha", desc=True)
+        .order("id", desc=True)
+        .limit(limit)
+        .execute()
+    )
+    if not rows.data:
+        return None
+    buttons = []
+    for r in rows.data:
+        cat = r.get("categorias") or {}
+        emoji = cat.get("emoji", "📌")
+        signo = "-" if r["tipo"] == "gasto" else "+"
+        desc = r["descripcion"][:22] + "…" if len(r["descripcion"]) > 22 else r["descripcion"]
+        dia = r["fecha"][8:10] + "/" + r["fecha"][5:7]
+        label = f"{emoji} {signo}${r['monto']:,.0f} {desc} ({dia})"
+        buttons.append([{"text": label, "callback_data": f"{action}:{r['id']}"}])
+    return {"inline_keyboard": buttons}
 
 
 async def _send(chat_id: int, text: str, token: str,
@@ -437,6 +480,33 @@ async def _save_and_confirm(
 
 
 async def _process_text(text: str, user_id: str, chat_id: int, token: str) -> None:
+    # ── Edición de monto pendiente ──
+    supabase = get_supabase()
+    pending = (
+        supabase.table("movimientos")
+        .select("id, descripcion, monto")
+        .eq("usuario_id", user_id)
+        .eq("estado", "pendiente_edicion_monto")
+        .order("id", desc=True)
+        .limit(1)
+        .execute()
+    )
+    if pending.data:
+        mov = pending.data[0]
+        # Intentar extraer un número del mensaje
+        num_match = re.search(r"[\d]+(?:[.,]\d+)?", text.replace(".", ""))
+        if num_match:
+            nuevo_monto = float(num_match.group().replace(",", "."))
+            supabase.table("movimientos").update(
+                {"monto": nuevo_monto, "estado": "confirmado"}
+            ).eq("id", mov["id"]).execute()
+            await _send(chat_id,
+                f"✅ *{mov['descripcion']}* actualizado: ${nuevo_monto:,.0f}", token)
+            return
+        # Si no es un número, continuar procesando como movimiento nuevo
+        # (cancelar el estado pendiente para no quedar atrapado)
+        supabase.table("movimientos").update({"estado": "confirmado"}).eq("id", mov["id"]).execute()
+
     dia_mes = parse_recurrente(text)
     num_cuotas = parse_cuotas(text)
 
@@ -668,6 +738,73 @@ async def telegram_webhook(request: Request):
                 await _answer_callback(callback_id, token)
                 await _edit_message(chat_id, message_id, "⏭ Saltado por hoy.", token)
 
+        # Seleccionar movimiento para editar → submenu
+        elif parts[0] == "edit" and len(parts) == 2:
+            movement_id = int(parts[1])
+            row = supabase.table("movimientos").select("descripcion, monto, tipo").eq("id", movement_id).single().execute()
+            if row.data and token:
+                r = row.data
+                signo = "-" if r["tipo"] == "gasto" else "+"
+                await _answer_callback(callback_id, token)
+                await _edit_message(chat_id, message_id,
+                    f"✏️ *{r['descripcion']}* — {signo}${r['monto']:,.0f}\n¿Qué querés hacer?", token)
+                await _send(chat_id, "Elegí una opción:", token, parse_mode="",
+                            reply_markup=_edit_submenu_keyboard(movement_id))
+
+        # Editar monto: marcar como pendiente y pedir nuevo valor
+        elif parts[0] == "edit_monto" and len(parts) == 2:
+            movement_id = int(parts[1])
+            supabase.table("movimientos").update(
+                {"estado": "pendiente_edicion_monto"}
+            ).eq("id", movement_id).execute()
+            row = supabase.table("movimientos").select("descripcion").eq("id", movement_id).single().execute()
+            desc = row.data["descripcion"] if row.data else "?"
+            if token:
+                await _answer_callback(callback_id, token)
+                await _edit_message(chat_id, message_id,
+                    f"💰 Enviá el nuevo monto para *{desc}*:", token)
+
+        # Editar categoría: mostrar teclado de categorías
+        elif parts[0] == "edit_cat" and len(parts) == 2:
+            movement_id = int(parts[1])
+            row = supabase.table("movimientos").select("descripcion").eq("id", movement_id).single().execute()
+            desc = row.data["descripcion"] if row.data else "?"
+            if token:
+                await _answer_callback(callback_id, token)
+                await _edit_message(chat_id, message_id,
+                    f"📂 ¿A qué categoría movemos *{desc}*?", token)
+                await _send(chat_id, "Elegí categoría:", token, parse_mode="",
+                            reply_markup=_category_keyboard(movement_id))
+
+        # Borrar: pedir confirmación
+        elif parts[0] == "del" and len(parts) == 2:
+            movement_id = int(parts[1])
+            row = supabase.table("movimientos").select("descripcion, monto, tipo").eq("id", movement_id).single().execute()
+            if row.data and token:
+                r = row.data
+                signo = "-" if r["tipo"] == "gasto" else "+"
+                await _answer_callback(callback_id, token)
+                await _edit_message(chat_id, message_id,
+                    f"🗑️ ¿Borrar *{r['descripcion']}* ({signo}${r['monto']:,.0f})?", token)
+                await _send(chat_id, "¿Confirmar?", token, parse_mode="",
+                            reply_markup=_del_confirm_keyboard(movement_id))
+
+        # Confirmar borrado
+        elif parts[0] == "del_ok" and len(parts) == 2:
+            movement_id = int(parts[1])
+            row = supabase.table("movimientos").select("descripcion, monto").eq("id", movement_id).single().execute()
+            supabase.table("movimientos").delete().eq("id", movement_id).execute()
+            if token:
+                await _answer_callback(callback_id, token)
+                desc = row.data["descripcion"] if row.data else "?"
+                await _edit_message(chat_id, message_id, f"🗑️ *{desc}* eliminado.", token)
+
+        # Cancelar borrado
+        elif parts[0] == "del_no" and len(parts) == 2:
+            if token:
+                await _answer_callback(callback_id, token)
+                await _edit_message(chat_id, message_id, "✕ Cancelado.", token)
+
         return JSONResponse({"ok": True})
 
     # ── Mensajes ───────────────────────────────────────────────────────────────
@@ -723,6 +860,24 @@ async def telegram_webhook(request: Request):
                 for r in rows.data:
                     lines.append(f"• {r['descripcion']} — ${r['monto']:,.0f} — día {r['dia_del_mes']}")
                 await _send(chat_id, "\n".join(lines), token)
+        return JSONResponse({"ok": True})
+
+    if text.lower().startswith("/editar"):
+        if token:
+            kb = await _recent_movements_keyboard(user_id, "edit")
+            if kb:
+                await _send(chat_id, "✏️ ¿Qué movimiento querés editar?", token, reply_markup=kb)
+            else:
+                await _send(chat_id, "No encontré movimientos recientes.", token, parse_mode="")
+        return JSONResponse({"ok": True})
+
+    if text.lower().startswith("/borrar"):
+        if token:
+            kb = await _recent_movements_keyboard(user_id, "del")
+            if kb:
+                await _send(chat_id, "🗑️ ¿Qué movimiento querés borrar?", token, reply_markup=kb)
+            else:
+                await _send(chat_id, "No encontré movimientos recientes.", token, parse_mode="")
         return JSONResponse({"ok": True})
 
     if text.lower().startswith("/presupuesto"):
