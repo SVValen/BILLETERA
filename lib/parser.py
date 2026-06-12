@@ -1,5 +1,48 @@
 import re
 
+# ── Detección de gastos recurrentes y cuotas ─────────────────────────────────
+
+def parse_recurrente(text: str) -> int | None:
+    """Detecta si el texto configura un gasto recurrente. Retorna el día del mes (1-31)."""
+    patterns = [
+        r"todos?\s+los?\s+(\d{1,2})(?:\s+del?\s+mes)?",
+        r"el\s+(\d{1,2})\s+de\s+cada\s+mes",
+        r"cada\s+mes\s+el\s+(\d{1,2})",
+        r"mensual(?:mente)?\s+el\s+(\d{1,2})",
+    ]
+    for p in patterns:
+        m = re.search(p, text.lower())
+        if m:
+            day = int(m.group(1))
+            if 1 <= day <= 31:
+                return day
+    return None
+
+
+def parse_cuotas(text: str) -> int | None:
+    """Detecta si el texto menciona cuotas. Retorna el número de cuotas."""
+    m = re.search(r"(?:en\s+)?(\d+)\s*cuotas?\b", text.lower())
+    if m:
+        n = int(m.group(1))
+        return n if n > 1 else None
+    return None
+
+
+def strip_recurrente(text: str) -> str:
+    """Elimina el patrón recurrente del texto para parsear monto/descripción limpio."""
+    cleaned = re.sub(r"todos?\s+los?\s+\d{1,2}(?:\s+del?\s+mes)?", "", text, flags=re.IGNORECASE)
+    cleaned = re.sub(r"el\s+\d{1,2}\s+de\s+cada\s+mes", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"cada\s+mes\s+el\s+\d{1,2}", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"mensual(?:mente)?\s+el\s+\d{1,2}", "", cleaned, flags=re.IGNORECASE)
+    return re.sub(r"\s{2,}", " ", cleaned).strip()
+
+
+def strip_cuotas(text: str) -> str:
+    """Elimina la mención de cuotas del texto para parsear monto/descripción limpio."""
+    cleaned = re.sub(r"(?:en\s+)?\d+\s*cuotas?\b", "", text, flags=re.IGNORECASE)
+    return re.sub(r"\s{2,}", " ", cleaned).strip()
+
+
 # Palabras que indican tipo=ingreso independientemente del patrón
 INCOME_KEYWORDS = [
     "sueldo", "salario", "cobré", "cobre", "ingresé", "ingrese",
