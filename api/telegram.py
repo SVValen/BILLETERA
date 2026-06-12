@@ -44,8 +44,17 @@ CAT_BUTTONS = [
     (1,  "🛒 Super"),    (3,  "🍽️ Comida"),  (2,  "🚗 Trans."),  (4,  "💡 Servicios"),
     (5,  "🎬 Entret."),  (6,  "🏥 Salud"),   (8,  "👕 Ropa"),    (10, "🏠 Vivienda"),
     (9,  "📚 Educ."),    (11, "🐾 Mascotas"), (12, "✈️ Viajes"),  (13, "🛡️ Seguros"),
-    (14, "💰 Invers."),  (15, "💳 Compras"),  (16, "✨ Belleza"), (7,  "📌 Otros"),
+    (14, "💰 Invers."),  (15, "💳 Compras"),  (16, "✨ Belleza"), (18, "📱 Suscripc."),
+    (7,  "📌 Otros"),
 ]
+
+# Palabras a ignorar al aprender keywords (demasiado genéricas)
+_STOP_WORDS = {
+    "para", "pero", "como", "este", "esta", "esos", "esas", "unos", "unas",
+    "algo", "todo", "toda", "cada", "otro", "otra", "mismo", "desde", "hasta",
+    "sobre", "entre", "bajo", "segun", "durante", "mediante", "cuota", "pago",
+    "gasto", "compra", "oficial", "primero", "ultimo", "nuevo", "nueva",
+}
 
 CAT_NAME_MAP = {
     "super": 1, "supermercado": 1, "almacen": 1,
@@ -433,6 +442,58 @@ def _detect_currency(text: str) -> str:
     return "USD" if words & DOLLAR_KEYWORDS else "ARS"
 
 
+def _extract_keywords(descripcion: str) -> list[str]:
+    """Extrae palabras útiles de una descripción para aprender a categorizar."""
+    # Limpiar anotaciones automáticas añadidas por el bot
+    clean = re.sub(r'\(cuota \d+/\d+\)', '', descripcion)
+    clean = re.sub(r'\(USD.*?\)', '', clean)
+    clean = re.sub(r'@ \$[\d.,]+.*', '', clean)
+    words = re.findall(r'[a-záéíóúüñA-ZÁÉÍÓÚÜÑ]{4,}', clean.lower())
+    return [w for w in words if w not in _STOP_WORDS]
+
+
+async def _save_learned_keywords(descripcion: str, categoria_id: int, usuario_id: str) -> None:
+    """Guarda las palabras de la descripción como keywords aprendidas para ese usuario."""
+    words = _extract_keywords(descripcion)
+    if not words:
+        return
+    supabase = get_supabase()
+    for word in words[:6]:
+        try:
+            supabase.table("keywords_aprendidas").upsert(
+                {"usuario_id": usuario_id, "keyword": word, "categoria_id": categoria_id},
+                on_conflict="usuario_id,keyword",
+            ).execute()
+        except Exception:
+            pass
+
+
+async def _categorize(descripcion: str, usuario_id: str) -> int:
+    """Categoriza usando keywords hardcodeadas primero, luego las aprendidas por el usuario."""
+    cat_id = categorize_from_keywords(descripcion)
+    if cat_id != 7:  # Si no es Otros, confiamos en el hardcoded
+        return cat_id
+
+    # Buscar en keywords aprendidas
+    words = _extract_keywords(descripcion)
+    if not words:
+        return 7
+
+    supabase = get_supabase()
+    for word in words:
+        r = (
+            supabase.table("keywords_aprendidas")
+            .select("categoria_id")
+            .eq("usuario_id", usuario_id)
+            .eq("keyword", word)
+            .execute()
+        )
+        if r.data:
+            return r.data[0]["categoria_id"]
+
+    return 7
+
+
 async def _save_and_confirm(
     *,
     chat_id: int,
@@ -445,7 +506,7 @@ async def _save_and_confirm(
     nota_monto_bajo: bool = False,
     fecha: str | None = None,
 ) -> None:
-    categoria_id = 17 if tipo == "ingreso" else categorize_from_keywords(descripcion)
+    categoria_id = 17 if tipo == "ingreso" else await _categorize(descripcion, user_id)
 
     supabase = get_supabase()
     result = supabase.table("movimientos").insert({
@@ -552,7 +613,7 @@ async def _process_text(text: str, user_id: str, chat_id: int, token: str) -> No
             monto = round(monto * tasa)
             descripcion = f"{desc_limpia} (USD @ ${tasa:,.0f} oficial)"
 
-        categoria_id = categorize_from_keywords(descripcion)
+        categoria_id = await _categorize(descripcion, user_id)
         supabase = get_supabase()
         result = supabase.table("recurrentes").insert({
             "usuario_id": user_id,
@@ -582,7 +643,7 @@ async def _process_text(text: str, user_id: str, chat_id: int, token: str) -> No
             descripcion = f"{desc_limpia} (USD @ ${tasa:,.0f} oficial)"
 
         monto_cuota = round(monto / num_cuotas, 2)
-        categoria_id = categorize_from_keywords(descripcion)
+        categoria_id = await _categorize(descripcion, user_id)
         supabase = get_supabase()
         result = supabase.table("cuotas_plan").insert({
             "usuario_id": user_id,
@@ -648,14 +709,19 @@ async def telegram_webhook(request: Request):
             cat_row = supabase.table("categorias").select("nombre, emoji").eq("id", cat_id).single().execute()
             cat_name = cat_row.data.get("nombre", "?") if cat_row.data else "?"
             cat_emoji = cat_row.data.get("emoji", "📌") if cat_row.data else "📌"
-            mov = supabase.table("movimientos").select("usuario_id").eq("id", movement_id).single().execute()
+            mov = supabase.table("movimientos").select("usuario_id, descripcion").eq("id", movement_id).single().execute()
             if token:
                 await _answer_callback(callback_id, token)
                 await _edit_message(chat_id, message_id, f"✅ Guardado como {cat_emoji} {cat_name}", token)
-            if mov.data and token:
-                await _check_presupuesto_alert(
-                    usuario_id=mov.data["usuario_id"], categoria_id=cat_id, chat_id=chat_id, token=token
-                )
+            if mov.data:
+                uid = mov.data["usuario_id"]
+                desc = mov.data["descripcion"]
+                # Aprender keywords de esta categorización manual
+                await _save_learned_keywords(desc, cat_id, uid)
+                if token:
+                    await _check_presupuesto_alert(
+                        usuario_id=uid, categoria_id=cat_id, chat_id=chat_id, token=token
+                    )
 
         elif parts[0] == "monto_ok" and len(parts) == 2:
             movement_id = int(parts[1])

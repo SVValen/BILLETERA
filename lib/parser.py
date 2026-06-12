@@ -170,6 +170,18 @@ KEYWORDS: dict[int, list[str]] = {
         "encomienda", "dhl", "correo argentino", "andreani",
         "seguimiento pedido", "devolucion", "devolución",
     ],
+    18: [  # Suscripciones 📱
+        "google", "apple", "claude", "openai", "chatgpt", "copilot",
+        "spotify", "netflix", "disney", "hulu", "hbo", "max", "paramount",
+        "youtube", "prime", "amazon prime", "crunchyroll", "twitch",
+        "dropbox", "icloud", "drive", "onedrive", "mega",
+        "microsoft", "office", "adobe", "canva", "figma", "notion",
+        "slack", "zoom", "github", "gitlab", "vercel", "heroku",
+        "duolingo", "headspace", "calm", "blinkist",
+        "suscripcion", "suscripción", "membresia", "membresía",
+        "plan mensual", "plan anual", "renovacion", "renovación",
+        "autopago", "débito automático", "debito automatico",
+    ],
     16: [  # Belleza & Bienestar ✨
         "gym", "gimnasio", "gimnasia", "entrenador", "personal trainer",
         "fitness", "pilates", "yoga", "membresia", "membresía",
