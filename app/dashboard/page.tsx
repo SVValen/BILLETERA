@@ -127,7 +127,7 @@ export default function Dashboard() {
                     <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={90} label={false}>
                       {pieData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
                     </Pie>
-                    <Tooltip formatter={(v: number) => fmt(v)} />
+                    <Tooltip formatter={(v) => fmt(v as number)} />
                     <Legend iconSize={10} />
                   </PieChart>
                 </ResponsiveContainer>
@@ -142,7 +142,7 @@ export default function Dashboard() {
                   <CartesianGrid strokeDasharray="3 3" vertical={false} />
                   <XAxis dataKey="name" />
                   <YAxis tickFormatter={v => `$${(v / 1000).toFixed(0)}k`} />
-                  <Tooltip formatter={(v: number) => fmt(v)} />
+                  <Tooltip formatter={(v) => fmt(v as number)} />
                   <Bar dataKey="Gastos" fill="#ef4444" radius={[6, 6, 0, 0]} />
                   <Bar dataKey="Ingresos" fill="#22c55e" radius={[6, 6, 0, 0]} />
                 </BarChart>
