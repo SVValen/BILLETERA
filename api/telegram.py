@@ -119,20 +119,32 @@ def _del_confirm_keyboard(movement_id: int) -> dict:
     ]]}
 
 
-async def _recent_movements_keyboard(user_id: str, action: str, limit: int = 8) -> dict | None:
-    """Lista de botones con los últimos movimientos. action: 'edit' o 'del'."""
+async def _recent_movements_keyboard(
+    user_id: str, action: str, limit: int = 8, q: str = "", mes: str = ""
+) -> tuple[dict | None, int]:
+    """Lista de botones con movimientos. Retorna (keyboard, total_encontrados)."""
     supabase = get_supabase()
-    rows = (
+    query = (
         supabase.table("movimientos")
         .select("id, fecha, descripcion, monto, tipo, categorias(emoji)")
         .eq("usuario_id", user_id)
         .order("fecha", desc=True)
         .order("id", desc=True)
-        .limit(limit)
-        .execute()
     )
+    if q:
+        query = query.ilike("descripcion", f"%{q}%")
+    if mes:
+        start = f"{mes}-01"
+        year, month = int(mes[:4]), int(mes[5:7])
+        end = f"{year + 1}-01-01" if month == 12 else f"{year}-{month + 1:02d}-01"
+        query = query.gte("fecha", start).lt("fecha", end)
+    if not q:
+        query = query.limit(limit)
+
+    rows = query.execute()
     if not rows.data:
-        return None
+        return None, 0
+
     buttons = []
     for r in rows.data:
         cat = r.get("categorias") or {}
@@ -142,7 +154,7 @@ async def _recent_movements_keyboard(user_id: str, action: str, limit: int = 8) 
         dia = r["fecha"][8:10] + "/" + r["fecha"][5:7]
         label = f"{emoji} {signo}${r['monto']:,.0f} {desc} ({dia})"
         buttons.append([{"text": label, "callback_data": f"{action}:{r['id']}"}])
-    return {"inline_keyboard": buttons}
+    return {"inline_keyboard": buttons}, len(rows.data)
 
 
 async def _send(chat_id: int, text: str, token: str,
@@ -864,7 +876,7 @@ async def telegram_webhook(request: Request):
 
     if text.lower().startswith("/editar"):
         if token:
-            kb = await _recent_movements_keyboard(user_id, "edit")
+            kb, _ = await _recent_movements_keyboard(user_id, "edit")
             if kb:
                 await _send(chat_id, "✏️ ¿Qué movimiento querés editar?", token, reply_markup=kb)
             else:
@@ -873,11 +885,22 @@ async def telegram_webhook(request: Request):
 
     if text.lower().startswith("/borrar"):
         if token:
-            kb = await _recent_movements_keyboard(user_id, "del")
-            if kb:
-                await _send(chat_id, "🗑️ ¿Qué movimiento querés borrar?", token, reply_markup=kb)
+            q = text[len("/borrar"):].strip()
+            mes_actual = date.today().strftime("%Y-%m")
+            if q:
+                kb, total = await _recent_movements_keyboard(user_id, "del", q=q, mes=mes_actual)
+                if kb:
+                    await _send(chat_id,
+                        f"🗑️ *{total}* movimiento{'s' if total != 1 else ''} con \"{q}\" en {mes_actual}:",
+                        token, reply_markup=kb)
+                else:
+                    await _send(chat_id, f"No encontré movimientos con \"{q}\" este mes.", token, parse_mode="")
             else:
-                await _send(chat_id, "No encontré movimientos recientes.", token, parse_mode="")
+                kb, _ = await _recent_movements_keyboard(user_id, "del")
+                if kb:
+                    await _send(chat_id, "🗑️ ¿Qué movimiento querés borrar?", token, reply_markup=kb)
+                else:
+                    await _send(chat_id, "No encontré movimientos recientes.", token, parse_mode="")
         return JSONResponse({"ok": True})
 
     if text.lower().startswith("/presupuesto"):
