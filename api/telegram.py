@@ -67,7 +67,11 @@ async def telegram_webhook(request: Request):
             await _send(chat_id, "No entendí 🤔\n\n" + AYUDA, token)
         return JSONResponse({"ok": False})
 
-    categoria_id = categorize_from_keywords(parsed["descripcion"])
+    # Ingresos siempre van a categoría 17, gastos se categorizan por keywords
+    if parsed["tipo"] == "ingreso":
+        categoria_id = 17
+    else:
+        categoria_id = categorize_from_keywords(parsed["descripcion"])
 
     supabase = get_supabase()
     supabase.table("movimientos").insert({
