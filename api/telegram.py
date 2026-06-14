@@ -708,6 +708,12 @@ async def _process_text(text: str, user_id: str, chat_id: int, token: str) -> No
 
 @app.post("/api/telegram")
 async def telegram_webhook(request: Request):
+    webhook_secret = os.environ.get("TELEGRAM_WEBHOOK_SECRET", "")
+    if webhook_secret:
+        incoming = request.headers.get("x-telegram-bot-api-secret-token", "")
+        if incoming != webhook_secret:
+            return JSONResponse({"error": "unauthorized"}, status_code=403)
+
     data = await request.json()
     token = os.environ.get("TELEGRAM_TOKEN", "")
 

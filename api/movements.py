@@ -6,6 +6,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from lib.supabase_client import get_supabase
+from lib.auth import get_telegram_id_from_request
 
 app = FastAPI()
 
@@ -21,47 +22,42 @@ def _mes_rango(mes: str) -> tuple[str, str]:
 
 @app.get("/api/movements")
 async def get_movements(request: Request):
+    telegram_id, err = await get_telegram_id_from_request(request)
+    if err:
+        return err
+
     mes = request.query_params.get("mes", "")
-    usuario = request.query_params.get("usuario", "")
     q = request.query_params.get("q", "").strip()
     pagina = max(1, int(request.query_params.get("pagina", "1")))
-    todos = request.query_params.get("todos", "")  # si "1", sin paginación
+    todos = request.query_params.get("todos", "")
     tipo = request.query_params.get("tipo", "").strip()
     categoria_id = request.query_params.get("categoria_id", "").strip()
-
-    if not usuario:
-        return JSONResponse({"error": "Falta parámetro 'usuario'"}, status_code=400)
 
     supabase = get_supabase()
     query = (
         supabase.table("movimientos")
         .select("id, fecha, descripcion, monto, tipo, origen, categorias(nombre, emoji)", count="exact")
-        .eq("usuario_id", usuario)
+        .eq("usuario_id", telegram_id)
         .order("fecha", desc=True)
         .order("id", desc=True)
     )
 
-    # Filtro por mes (opcional si se hace búsqueda global)
     if mes:
         start, end = _mes_rango(mes)
         query = query.gte("fecha", start).lt("fecha", end)
 
-    # Búsqueda por descripción
     if q:
         query = query.ilike("descripcion", f"%{q}%")
 
-    # Filtro por tipo (gasto/ingreso)
     if tipo in ("gasto", "ingreso"):
         query = query.eq("tipo", tipo)
 
-    # Filtro por categoría
     if categoria_id:
         try:
             query = query.eq("categoria_id", int(categoria_id))
         except ValueError:
             pass
 
-    # Paginación
     if not todos:
         offset = (pagina - 1) * PAGE_SIZE
         query = query.range(offset, offset + PAGE_SIZE - 1)
@@ -73,6 +69,6 @@ async def get_movements(request: Request):
         "data": response.data or [],
         "total": total,
         "pagina": pagina,
-        "paginas": max(1, -(-total // PAGE_SIZE)),  # ceil division
+        "paginas": max(1, -(-total // PAGE_SIZE)),
         "page_size": PAGE_SIZE,
     })

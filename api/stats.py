@@ -6,6 +6,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from lib.supabase_client import get_supabase
+from lib.auth import get_telegram_id_from_request
 
 app = FastAPI()
 
@@ -19,13 +20,13 @@ def _mes_rango(mes: str) -> tuple[str, str]:
 
 @app.get("/api/stats")
 async def get_stats(request: Request):
-    mes = request.query_params.get("mes", "")
-    usuario = request.query_params.get("usuario", "")
+    telegram_id, err = await get_telegram_id_from_request(request)
+    if err:
+        return err
 
+    mes = request.query_params.get("mes", "")
     if not mes:
         return JSONResponse({"error": "Falta parámetro 'mes'"}, status_code=400)
-    if not usuario:
-        return JSONResponse({"error": "Falta parámetro 'usuario'"}, status_code=400)
 
     start, end = _mes_rango(mes)
     supabase = get_supabase()
@@ -33,7 +34,7 @@ async def get_stats(request: Request):
     response = (
         supabase.table("movimientos")
         .select("monto, tipo, categorias(nombre, emoji)")
-        .eq("usuario_id", usuario)
+        .eq("usuario_id", telegram_id)
         .gte("fecha", start)
         .lt("fecha", end)
         .execute()

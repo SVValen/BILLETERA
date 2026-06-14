@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
+import { fetchWithAuth } from '@/lib/fetch-with-auth'
 
 function fmt(n: number) {
   return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(n)
@@ -50,21 +51,17 @@ export default function MovimientosTab({ telegramId, mes }: { telegramId: string
 
   const fetch_ = useCallback(async () => {
     setLoading(true)
-    const params = new URLSearchParams({
-      usuario: telegramId,
-      mes,
-      pagina: String(pagina),
-    })
+    const params = new URLSearchParams({ mes, pagina: String(pagina) })
     if (q) params.set('q', q)
     if (filtroTipo !== 'todos') params.set('tipo', filtroTipo)
     if (filtroCategoria) params.set('categoria_id', filtroCategoria)
-    const r = await fetch(`/api/movements?${params}`)
+    const r = await fetchWithAuth(`/api/movements?${params}`)
     const data = await r.json()
     setMovements(data.data || [])
     setTotal(data.total || 0)
     setPaginas(data.paginas || 1)
     setLoading(false)
-  }, [telegramId, mes, pagina, q, filtroTipo, filtroCategoria])
+  }, [mes, pagina, q, filtroTipo, filtroCategoria])
 
   useEffect(() => {
     setPagina(1)

@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
+import { fetchWithAuth } from '@/lib/fetch-with-auth'
 
 function fmt(n: number) {
   return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(n)
@@ -30,22 +31,21 @@ export default function ObjetivosTab({ telegramId }: { telegramId: string }) {
 
   const fetch_ = useCallback(async () => {
     setLoading(true)
-    const r = await fetch(`/api/objetivos?usuario=${telegramId}`)
+    const r = await fetchWithAuth('/api/objetivos')
     const data = await r.json()
     setObjetivos(Array.isArray(data) ? data : [])
     setLoading(false)
-  }, [telegramId])
+  }, [])
 
   useEffect(() => { fetch_() }, [fetch_])
 
   async function crearObjetivo() {
     if (!form.nombre || !form.monto || !form.fecha) return
     setSaving(true)
-    await fetch('/api/objetivos', {
+    await fetchWithAuth('/api/objetivos', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        usuario: telegramId,
         nombre: form.nombre,
         monto_objetivo: parseFloat(form.monto),
         fecha_objetivo: form.fecha,
@@ -60,7 +60,7 @@ export default function ObjetivosTab({ telegramId }: { telegramId: string }) {
   async function aportar(id: number) {
     if (!aporteVal) return
     setSaving(true)
-    await fetch(`/api/objetivos?id=${id}`, {
+    await fetchWithAuth(`/api/objetivos?id=${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ aporte: parseFloat(aporteVal) }),
@@ -72,7 +72,7 @@ export default function ObjetivosTab({ telegramId }: { telegramId: string }) {
   }
 
   async function eliminar(id: number) {
-    await fetch(`/api/objetivos?id=${id}`, { method: 'DELETE' })
+    await fetchWithAuth(`/api/objetivos?id=${id}`, { method: 'DELETE' })
     await fetch_()
   }
 

@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
+import { fetchWithAuth } from '@/lib/fetch-with-auth'
 
 function fmt(n: number) {
   return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(n)
@@ -45,11 +46,11 @@ export default function PresupuestosTab({ telegramId, mes }: { telegramId: strin
 
   const fetch_ = useCallback(async () => {
     setLoading(true)
-    const r = await fetch(`/api/presupuestos?usuario=${telegramId}&mes=${mes}`)
+    const r = await fetchWithAuth(`/api/presupuestos?mes=${mes}`)
     const data = await r.json()
     setPresupuestos(Array.isArray(data) ? data : [])
     setLoading(false)
-  }, [telegramId, mes])
+  }, [mes])
 
   useEffect(() => { fetch_() }, [fetch_])
 
@@ -57,10 +58,10 @@ export default function PresupuestosTab({ telegramId, mes }: { telegramId: strin
     if (!editando || !inputMonto) return
     setSaving(true)
     const monto = parseFloat(inputMonto.replace(/\./g, '').replace(',', '.'))
-    await fetch('/api/presupuestos', {
+    await fetchWithAuth('/api/presupuestos', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ usuario: telegramId, categoria_id: editando.cat_id, monto, mes }),
+      body: JSON.stringify({ categoria_id: editando.cat_id, monto, mes }),
     })
     setEditando(null)
     setInputMonto('')
@@ -70,7 +71,7 @@ export default function PresupuestosTab({ telegramId, mes }: { telegramId: strin
   }
 
   async function eliminar(id: number) {
-    await fetch(`/api/presupuestos?id=${id}`, { method: 'DELETE' })
+    await fetchWithAuth(`/api/presupuestos?id=${id}`, { method: 'DELETE' })
     await fetch_()
   }
 

@@ -8,6 +8,7 @@ from datetime import date
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from lib.supabase_client import get_supabase
+from lib.auth import get_telegram_id_from_request
 
 app = FastAPI()
 
@@ -22,15 +23,15 @@ def _add_months(d: date, n: int) -> date:
 
 @app.get("/api/cuotas")
 async def get_cuotas(request: Request):
-    usuario = request.query_params.get("usuario", "")
-    if not usuario:
-        return JSONResponse({"error": "Falta usuario"}, status_code=400)
+    telegram_id, err = await get_telegram_id_from_request(request)
+    if err:
+        return err
 
     supabase = get_supabase()
     rows = (
         supabase.table("cuotas_plan")
         .select("*, categorias(nombre, emoji)")
-        .eq("usuario_id", usuario)
+        .eq("usuario_id", telegram_id)
         .eq("activo", True)
         .not_.is_("fecha_primera_cuota", "null")
         .order("created_at", desc=True)
@@ -43,16 +44,11 @@ async def get_cuotas(request: Request):
         primera = date.fromisoformat(p["fecha_primera_cuota"])
         n = p["num_cuotas"]
 
-        # Cuotas vencidas hasta hoy
         meses_transcurridos = (hoy.year - primera.year) * 12 + (hoy.month - primera.month)
         pagadas = min(meses_transcurridos + 1, n)
         restantes = n - pagadas
 
-        # Próxima cuota
-        if restantes > 0:
-            prox = _add_months(primera, pagadas)
-        else:
-            prox = None
+        prox = _add_months(primera, pagadas) if restantes > 0 else None
 
         cat = p.get("categorias") or {}
         result.append({
@@ -70,7 +66,6 @@ async def get_cuotas(request: Request):
             "fecha_primera": p["fecha_primera_cuota"],
         })
 
-    # Solo las que tienen cuotas restantes
     result = [r for r in result if r["restantes"] > 0]
     result.sort(key=lambda x: x["proxima_cuota"] or "")
     return JSONResponse(result)

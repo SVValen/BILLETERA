@@ -7,21 +7,22 @@ from datetime import date
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from lib.supabase_client import get_supabase
+from lib.auth import get_telegram_id_from_request
 
 app = FastAPI()
 
 
 @app.get("/api/objetivos")
 async def get_objetivos(request: Request):
-    usuario = request.query_params.get("usuario", "")
-    if not usuario:
-        return JSONResponse({"error": "Falta usuario"}, status_code=400)
+    telegram_id, err = await get_telegram_id_from_request(request)
+    if err:
+        return err
 
     supabase = get_supabase()
     rows = (
         supabase.table("objetivos_ahorro")
         .select("*")
-        .eq("usuario_id", usuario)
+        .eq("usuario_id", telegram_id)
         .eq("activo", True)
         .order("fecha_objetivo")
         .execute()
@@ -53,17 +54,24 @@ async def get_objetivos(request: Request):
 
 @app.post("/api/objetivos")
 async def create_objetivo(request: Request):
+    telegram_id, err = await get_telegram_id_from_request(request)
+    if err:
+        return err
+
     body = await request.json()
-    usuario = body.get("usuario", "")
     nombre = body.get("nombre", "").strip()
     monto_objetivo = body.get("monto_objetivo")
     fecha_objetivo = body.get("fecha_objetivo", "")
-    if not all([usuario, nombre, monto_objetivo, fecha_objetivo]):
+
+    if not all([nombre, monto_objetivo, fecha_objetivo]):
         return JSONResponse({"error": "Faltan campos"}, status_code=400)
+
+    if not isinstance(monto_objetivo, (int, float)) or monto_objetivo <= 0:
+        return JSONResponse({"error": "El monto debe ser un número positivo"}, status_code=400)
 
     supabase = get_supabase()
     r = supabase.table("objetivos_ahorro").insert({
-        "usuario_id": usuario,
+        "usuario_id": telegram_id,
         "nombre": nombre,
         "monto_objetivo": monto_objetivo,
         "fecha_objetivo": fecha_objetivo,
@@ -75,6 +83,10 @@ async def create_objetivo(request: Request):
 @app.put("/api/objetivos")
 async def update_objetivo(request: Request):
     """Abonar o actualizar objetivo. ?id=X con body {aporte: N} o {monto_objetivo: N}."""
+    telegram_id, err = await get_telegram_id_from_request(request)
+    if err:
+        return err
+
     id_ = request.query_params.get("id")
     if not id_:
         return JSONResponse({"error": "Falta id"}, status_code=400)
@@ -83,24 +95,34 @@ async def update_objetivo(request: Request):
     supabase = get_supabase()
 
     if "aporte" in body:
-        obj = supabase.table("objetivos_ahorro").select("monto_actual").eq("id", int(id_)).single().execute()
+        obj = (
+            supabase.table("objetivos_ahorro")
+            .select("monto_actual")
+            .eq("id", int(id_))
+            .eq("usuario_id", telegram_id)
+            .execute()
+        )
         if not obj.data:
             return JSONResponse({"error": "No encontrado"}, status_code=404)
-        nuevo = obj.data["monto_actual"] + float(body["aporte"])
-        r = supabase.table("objetivos_ahorro").update({"monto_actual": nuevo}).eq("id", int(id_)).execute()
+        nuevo = obj.data[0]["monto_actual"] + float(body["aporte"])
+        r = supabase.table("objetivos_ahorro").update({"monto_actual": nuevo}).eq("id", int(id_)).eq("usuario_id", telegram_id).execute()
     else:
         update_data = {k: v for k, v in body.items() if k in ("nombre", "monto_objetivo", "fecha_objetivo")}
-        r = supabase.table("objetivos_ahorro").update(update_data).eq("id", int(id_)).execute()
+        r = supabase.table("objetivos_ahorro").update(update_data).eq("id", int(id_)).eq("usuario_id", telegram_id).execute()
 
     return JSONResponse({"ok": True, "data": r.data[0] if r.data else None})
 
 
 @app.delete("/api/objetivos")
 async def delete_objetivo(request: Request):
+    telegram_id, err = await get_telegram_id_from_request(request)
+    if err:
+        return err
+
     id_ = request.query_params.get("id")
     if not id_:
         return JSONResponse({"error": "Falta id"}, status_code=400)
 
     supabase = get_supabase()
-    supabase.table("objetivos_ahorro").update({"activo": False}).eq("id", int(id_)).execute()
+    supabase.table("objetivos_ahorro").update({"activo": False}).eq("id", int(id_)).eq("usuario_id", telegram_id).execute()
     return JSONResponse({"ok": True})

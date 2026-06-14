@@ -6,6 +6,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from lib.supabase_client import get_supabase
+from lib.auth import get_telegram_id_from_request
 
 app = FastAPI()
 
@@ -19,10 +20,13 @@ def _mes_rango(mes: str) -> tuple[str, str]:
 
 @app.get("/api/presupuestos")
 async def get_presupuestos(request: Request):
-    usuario = request.query_params.get("usuario", "")
+    telegram_id, err = await get_telegram_id_from_request(request)
+    if err:
+        return err
+
     mes = request.query_params.get("mes", "")
-    if not usuario or not mes:
-        return JSONResponse({"error": "Faltan parámetros"}, status_code=400)
+    if not mes:
+        return JSONResponse({"error": "Falta parámetro 'mes'"}, status_code=400)
 
     supabase = get_supabase()
     start, end = _mes_rango(mes)
@@ -30,7 +34,7 @@ async def get_presupuestos(request: Request):
     pres_rows = (
         supabase.table("presupuestos")
         .select("id, categoria_id, monto, categorias(nombre, emoji)")
-        .eq("usuario_id", usuario)
+        .eq("usuario_id", telegram_id)
         .eq("mes", mes)
         .execute()
     )
@@ -38,7 +42,7 @@ async def get_presupuestos(request: Request):
     mov_rows = (
         supabase.table("movimientos")
         .select("categoria_id, monto")
-        .eq("usuario_id", usuario)
+        .eq("usuario_id", telegram_id)
         .eq("tipo", "gasto")
         .gte("fecha", start)
         .lt("fecha", end)
@@ -73,19 +77,26 @@ async def get_presupuestos(request: Request):
 
 @app.post("/api/presupuestos")
 async def upsert_presupuesto(request: Request):
+    telegram_id, err = await get_telegram_id_from_request(request)
+    if err:
+        return err
+
     body = await request.json()
-    usuario = body.get("usuario", "")
     categoria_id = body.get("categoria_id")
     monto = body.get("monto")
     mes = body.get("mes", "")
-    if not all([usuario, categoria_id, monto, mes]):
+
+    if not all([categoria_id, monto is not None, mes]):
         return JSONResponse({"error": "Faltan campos"}, status_code=400)
+
+    if not isinstance(monto, (int, float)) or monto <= 0:
+        return JSONResponse({"error": "El monto debe ser un número positivo"}, status_code=400)
 
     supabase = get_supabase()
     existing = (
         supabase.table("presupuestos")
         .select("id")
-        .eq("usuario_id", usuario)
+        .eq("usuario_id", telegram_id)
         .eq("categoria_id", categoria_id)
         .eq("mes", mes)
         .execute()
@@ -95,7 +106,7 @@ async def upsert_presupuesto(request: Request):
         r = supabase.table("presupuestos").update({"monto": monto}).eq("id", existing.data[0]["id"]).execute()
     else:
         r = supabase.table("presupuestos").insert({
-            "usuario_id": usuario,
+            "usuario_id": telegram_id,
             "categoria_id": categoria_id,
             "monto": monto,
             "mes": mes,
@@ -106,23 +117,41 @@ async def upsert_presupuesto(request: Request):
 
 @app.put("/api/presupuestos")
 async def update_presupuesto(request: Request):
+    telegram_id, err = await get_telegram_id_from_request(request)
+    if err:
+        return err
+
     id_ = request.query_params.get("id")
     body = await request.json()
     monto = body.get("monto")
+
     if not id_ or monto is None:
         return JSONResponse({"error": "Faltan parámetros"}, status_code=400)
 
+    if not isinstance(monto, (int, float)) or monto <= 0:
+        return JSONResponse({"error": "El monto debe ser un número positivo"}, status_code=400)
+
     supabase = get_supabase()
-    r = supabase.table("presupuestos").update({"monto": monto}).eq("id", int(id_)).execute()
+    r = (
+        supabase.table("presupuestos")
+        .update({"monto": monto})
+        .eq("id", int(id_))
+        .eq("usuario_id", telegram_id)
+        .execute()
+    )
     return JSONResponse({"ok": True, "data": r.data[0] if r.data else None})
 
 
 @app.delete("/api/presupuestos")
 async def delete_presupuesto(request: Request):
+    telegram_id, err = await get_telegram_id_from_request(request)
+    if err:
+        return err
+
     id_ = request.query_params.get("id")
     if not id_:
         return JSONResponse({"error": "Falta id"}, status_code=400)
 
     supabase = get_supabase()
-    supabase.table("presupuestos").delete().eq("id", int(id_)).execute()
+    supabase.table("presupuestos").delete().eq("id", int(id_)).eq("usuario_id", telegram_id).execute()
     return JSONResponse({"ok": True})

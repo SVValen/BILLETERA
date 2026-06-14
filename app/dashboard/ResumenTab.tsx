@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
+import { fetchWithAuth } from '@/lib/fetch-with-auth'
 import {
   PieChart, Pie, Cell, Tooltip, Legend,
   BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer,
@@ -54,9 +55,9 @@ export default function ResumenTab({ telegramId, mes }: { telegramId: string; me
     setError(null)
     try {
       const [sRes, cRes, rRes] = await Promise.all([
-        fetch(`/api/stats?mes=${mes}&usuario=${telegramId}`),
-        fetch(`/api/cuotas?usuario=${telegramId}`),
-        fetch(`/api/recurrentes?usuario=${telegramId}&dias=35`),
+        fetchWithAuth(`/api/stats?mes=${mes}`),
+        fetchWithAuth(`/api/cuotas`),
+        fetchWithAuth(`/api/recurrentes?dias=35`),
       ])
       if (!sRes.ok) throw new Error('Error al cargar estadísticas')
       const [sData, cData, rData] = await Promise.all([sRes.json(), cRes.json(), rRes.json()])

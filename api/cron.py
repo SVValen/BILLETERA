@@ -116,10 +116,9 @@ async def _enviar_resumen_semanal(hoy: date, token: str) -> int:
 @app.get("/api/cron")
 async def cron_job(request: Request):
     cron_secret = os.environ.get("CRON_SECRET", "")
-    if cron_secret:
-        auth = request.headers.get("authorization", "")
-        if auth != f"Bearer {cron_secret}":
-            return JSONResponse({"error": "unauthorized"}, status_code=401)
+    auth = request.headers.get("authorization", "")
+    if not cron_secret or auth != f"Bearer {cron_secret}":
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
 
     token = os.environ.get("TELEGRAM_TOKEN", "")
     if not token:
