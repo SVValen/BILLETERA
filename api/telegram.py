@@ -619,6 +619,10 @@ async def _process_text(text: str, user_id: str, chat_id: int, token: str) -> No
     descripcion = parsed["descripcion"]
     tipo = parsed["tipo"]
 
+    if monto <= 0:
+        await _send(chat_id, "El monto debe ser mayor a cero 🤔", token, parse_mode="")
+        return
+
     # ── Gasto recurrente ──
     if dia_mes and tipo == "gasto":
         # Conversión USD si corresponde

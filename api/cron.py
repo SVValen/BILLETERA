@@ -57,29 +57,36 @@ async def _procesar_recurrentes(hoy: date, token: str) -> int:
 
 
 async def _enviar_resumen_semanal(hoy: date, token: str) -> int:
-    """Los lunes: resumen de la semana pasada."""
+    """Los lunes: resumen de la semana pasada. Usa 2 queries en total (no N+1)."""
     supabase = get_supabase()
     inicio = hoy - timedelta(days=7)
     fin = hoy - timedelta(days=1)
 
     perfiles = supabase.table("perfiles").select("telegram_id").execute()
+    uids = [p["telegram_id"] for p in (perfiles.data or []) if p.get("telegram_id")]
+    if not uids:
+        return 0
+
+    # Una sola query para todos los usuarios en lugar de N queries
+    movs = (
+        supabase.table("movimientos")
+        .select("usuario_id, monto, tipo, categorias(nombre, emoji)")
+        .in_("usuario_id", uids)
+        .gte("fecha", inicio.isoformat())
+        .lte("fecha", fin.isoformat())
+        .execute()
+    )
+
+    # Agrupar por usuario en Python
+    movs_por_uid: dict[str, list] = {uid: [] for uid in uids}
+    for m in (movs.data or []):
+        uid = m["usuario_id"]
+        if uid in movs_por_uid:
+            movs_por_uid[uid].append(m)
+
     enviados = 0
-
-    for p in (perfiles.data or []):
-        uid = p.get("telegram_id")
-        if not uid:
-            continue
-
-        movs = (
-            supabase.table("movimientos")
-            .select("monto, tipo, categorias(nombre, emoji)")
-            .eq("usuario_id", uid)
-            .gte("fecha", inicio.isoformat())
-            .lte("fecha", fin.isoformat())
-            .execute()
-        )
-
-        rows = movs.data or []
+    for uid in uids:
+        rows = movs_por_uid[uid]
         if not rows:
             continue
 
