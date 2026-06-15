@@ -7,7 +7,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from lib.supabase_client import get_supabase
 from lib.auth import get_telegram_id_from_request
-from lib.date_utils import mes_rango
+from lib.date_utils import mes_rango, validate_mes
 
 app = FastAPI()
 
@@ -21,6 +21,8 @@ async def get_presupuestos(request: Request):
     mes = request.query_params.get("mes", "")
     if not mes:
         return JSONResponse({"error": "Falta parámetro 'mes'"}, status_code=400)
+    if not validate_mes(mes):
+        return JSONResponse({"error": "Formato de mes inválido (YYYY-MM)"}, status_code=400)
 
     supabase = get_supabase()
     start, end = mes_rango(mes)
@@ -38,6 +40,7 @@ async def get_presupuestos(request: Request):
         .select("categoria_id, monto")
         .eq("usuario_id", telegram_id)
         .eq("tipo", "gasto")
+        .neq("estado", "anulado")
         .gte("fecha", start)
         .lt("fecha", end)
         .execute()

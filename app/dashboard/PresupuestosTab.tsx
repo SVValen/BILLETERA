@@ -36,7 +36,7 @@ const CATEGORIAS = [
   { id: 16, nombre: 'Belleza', emoji: '✨' },
 ]
 
-export default function PresupuestosTab({ telegramId, mes }: { telegramId: string; mes: string }) {
+export default function PresupuestosTab({ mes }: { mes: string }) {
   const [presupuestos, setPresupuestos] = useState<Presupuesto[]>([])
   const [loading, setLoading] = useState(true)
   const [editando, setEditando] = useState<{ id?: number; cat_id: number; nombre: string; emoji: string } | null>(null)
@@ -71,6 +71,7 @@ export default function PresupuestosTab({ telegramId, mes }: { telegramId: strin
   }
 
   async function eliminar(id: number) {
+    if (!confirm('¿Eliminar este presupuesto?')) return
     await fetchWithAuth(`/api/presupuestos?id=${id}`, { method: 'DELETE' })
     await fetch_()
   }

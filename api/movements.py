@@ -35,6 +35,7 @@ async def get_movements(request: Request):
         supabase.table("movimientos")
         .select("id, fecha, descripcion, monto, tipo, origen, categorias(nombre, emoji)", count="exact")
         .eq("usuario_id", telegram_id)
+        .neq("estado", "anulado")
         .order("fecha", desc=True)
         .order("id", desc=True)
     )

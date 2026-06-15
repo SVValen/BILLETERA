@@ -4,7 +4,6 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import re
-import calendar
 from datetime import date
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -13,7 +12,7 @@ from lib.parser import (
     parse_movement, categorize_from_keywords,
     parse_recurrente, parse_cuotas, strip_recurrente, strip_cuotas,
 )
-from lib.date_utils import mes_rango
+from lib.date_utils import mes_rango, add_months
 
 app = FastAPI()
 
@@ -158,6 +157,7 @@ async def _recent_movements_keyboard(
         supabase.table("movimientos")
         .select("id, fecha, descripcion, monto, tipo, categorias(emoji)")
         .eq("usuario_id", user_id)
+        .neq("estado", "anulado")
         .order("fecha", desc=True)
         .order("id", desc=True)
     )
@@ -287,6 +287,7 @@ async def _check_presupuesto_alert(
         .select("monto")
         .eq("usuario_id", usuario_id)
         .eq("categoria_id", categoria_id)
+        .neq("estado", "anulado")
         .gte("fecha", start)
         .lt("fecha", end)
         .eq("tipo", "gasto")
@@ -372,6 +373,7 @@ async def _handle_presupuesto_cmd(user_id: str, chat_id: int, args: str, token: 
         .select("categoria_id, monto")
         .eq("usuario_id", user_id)
         .eq("tipo", "gasto")
+        .neq("estado", "anulado")
         .gte("fecha", start)
         .lt("fecha", end)
         .execute()
@@ -400,14 +402,6 @@ async def _handle_presupuesto_cmd(user_id: str, chat_id: int, args: str, token: 
 
 # ── Helpers de fecha ──────────────────────────────────────────────────────────
 
-def _add_months(d: date, months: int) -> date:
-    month = d.month - 1 + months
-    year = d.year + month // 12
-    month = month % 12 + 1
-    day = min(d.day, calendar.monthrange(year, month)[1])
-    return date(year, month, day)
-
-
 def _first_of_month(d: date) -> date:
     return d.replace(day=1)
 
@@ -423,7 +417,7 @@ async def _create_cuota_movimientos(plan_id: int, primer_fecha: date, token: str
     movimientos = [
         {
             "usuario_id": p["usuario_id"],
-            "fecha": _add_months(primer_fecha, i).isoformat(),
+            "fecha": add_months(primer_fecha, i).isoformat(),
             "descripcion": f"{p['descripcion']} (cuota {i + 1}/{p['num_cuotas']})",
             "monto": p["monto_cuota"],
             "categoria_id": p["categoria_id"],
@@ -439,7 +433,7 @@ async def _create_cuota_movimientos(plan_id: int, primer_fecha: date, token: str
     ).eq("id", plan_id).execute()
 
     chat_id = int(p["usuario_id"])
-    ultima = _add_months(primer_fecha, p["num_cuotas"] - 1)
+    ultima = add_months(primer_fecha, p["num_cuotas"] - 1)
     await _send(
         chat_id,
         f"✅ *{p['descripcion']}* en {p['num_cuotas']} cuotas\n"
@@ -488,22 +482,24 @@ async def _categorize(descripcion: str, usuario_id: str) -> int:
     if cat_id != 7:  # Si no es Otros, confiamos en el hardcoded
         return cat_id
 
-    # Buscar en keywords aprendidas
     words = _extract_keywords(descripcion)
     if not words:
         return 7
 
+    # Una sola query para todas las palabras en lugar de N queries
     supabase = get_supabase()
-    for word in words:
-        r = (
-            supabase.table("keywords_aprendidas")
-            .select("categoria_id")
-            .eq("usuario_id", usuario_id)
-            .eq("keyword", word)
-            .execute()
-        )
-        if r.data:
-            return r.data[0]["categoria_id"]
+    r = (
+        supabase.table("keywords_aprendidas")
+        .select("keyword, categoria_id")
+        .eq("usuario_id", usuario_id)
+        .in_("keyword", words)
+        .execute()
+    )
+    if r.data:
+        kw_to_cat = {row["keyword"]: row["categoria_id"] for row in r.data}
+        for word in words:
+            if word in kw_to_cat:
+                return kw_to_cat[word]
 
     return 7
 
@@ -707,10 +703,10 @@ async def _process_text(text: str, user_id: str, chat_id: int, token: str) -> No
 @app.post("/api/telegram")
 async def telegram_webhook(request: Request):
     webhook_secret = os.environ.get("TELEGRAM_WEBHOOK_SECRET", "")
-    if webhook_secret:
-        incoming = request.headers.get("x-telegram-bot-api-secret-token", "")
-        if incoming != webhook_secret:
-            return JSONResponse({"error": "unauthorized"}, status_code=403)
+    if not webhook_secret:
+        return JSONResponse({"error": "TELEGRAM_WEBHOOK_SECRET no configurado"}, status_code=500)
+    if request.headers.get("x-telegram-bot-api-secret-token", "") != webhook_secret:
+        return JSONResponse({"error": "unauthorized"}, status_code=403)
 
     data = await request.json()
     token = os.environ.get("TELEGRAM_TOKEN", "")
@@ -804,7 +800,7 @@ async def telegram_webhook(request: Request):
             hoy = date.today()
             # Si el usuario elige "este mes" pero ya pasó el día 1, usar el mes siguiente
             meses = proximo if (proximo > 0 or hoy.day == 1) else 1
-            primer_fecha = _first_of_month(_add_months(hoy, meses))
+            primer_fecha = _first_of_month(add_months(hoy, meses))
             if token:
                 await _answer_callback(callback_id, token)
                 await _edit_message(chat_id, message_id,
@@ -903,11 +899,11 @@ async def telegram_webhook(request: Request):
                 await _send(chat_id, "¿Confirmar?", token, parse_mode="",
                             reply_markup=_del_confirm_keyboard(movement_id))
 
-        # Confirmar borrado
+        # Confirmar borrado (soft delete: estado=anulado)
         elif parts[0] == "del_ok" and len(parts) == 2:
             movement_id = int(parts[1])
             row = supabase.table("movimientos").select("descripcion, monto").eq("id", movement_id).eq("usuario_id", callback_user_id).single().execute()
-            supabase.table("movimientos").delete().eq("id", movement_id).eq("usuario_id", callback_user_id).execute()
+            supabase.table("movimientos").update({"estado": "anulado"}).eq("id", movement_id).eq("usuario_id", callback_user_id).execute()
             if token:
                 await _answer_callback(callback_id, token)
                 desc = row.data["descripcion"] if row.data else "?"

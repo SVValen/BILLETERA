@@ -1,7 +1,15 @@
 import { createSupabaseBrowser } from './supabase-browser'
+import type { SupabaseClient } from '@supabase/supabase-js'
+
+let _client: SupabaseClient | null = null
+
+function getClient() {
+  if (!_client) _client = createSupabaseBrowser()
+  return _client
+}
 
 export async function fetchWithAuth(url: string, options?: RequestInit): Promise<Response> {
-  const supabase = createSupabaseBrowser()
+  const supabase = getClient()
   const { data: { session } } = await supabase.auth.getSession()
 
   return fetch(url, {

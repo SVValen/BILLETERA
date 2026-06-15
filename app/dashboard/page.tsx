@@ -100,10 +100,10 @@ export default function Dashboard() {
       </div>
 
       <div className="page">
-        {tab === 'resumen' && <ResumenTab telegramId={telegramId} mes={mes} />}
-        {tab === 'presupuestos' && <PresupuestosTab telegramId={telegramId} mes={mes} />}
-        {tab === 'objetivos' && <ObjetivosTab telegramId={telegramId} />}
-        {tab === 'movimientos' && <MovimientosTab telegramId={telegramId} mes={mes} />}
+        {tab === 'resumen' && <ResumenTab mes={mes} />}
+        {tab === 'presupuestos' && <PresupuestosTab mes={mes} />}
+        {tab === 'objetivos' && <ObjetivosTab />}
+        {tab === 'movimientos' && <MovimientosTab mes={mes} />}
       </div>
     </>
   )

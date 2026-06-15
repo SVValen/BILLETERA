@@ -38,7 +38,7 @@ const CATEGORIAS = [
   { id: 18, emoji: '📱', nombre: 'Suscripciones' },
 ]
 
-export default function MovimientosTab({ telegramId, mes }: { telegramId: string; mes: string }) {
+export default function MovimientosTab({ mes }: { mes: string }) {
   const [movements, setMovements] = useState<Movement[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)

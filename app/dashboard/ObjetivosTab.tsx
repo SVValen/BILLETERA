@@ -20,7 +20,7 @@ interface Objetivo {
   recomendado_mensual: number
 }
 
-export default function ObjetivosTab({ telegramId }: { telegramId: string }) {
+export default function ObjetivosTab() {
   const [objetivos, setObjetivos] = useState<Objetivo[]>([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
@@ -72,6 +72,7 @@ export default function ObjetivosTab({ telegramId }: { telegramId: string }) {
   }
 
   async function eliminar(id: number) {
+    if (!confirm('¿Eliminar este objetivo?')) return
     await fetchWithAuth(`/api/objetivos?id=${id}`, { method: 'DELETE' })
     await fetch_()
   }

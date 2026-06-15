@@ -52,14 +52,17 @@ async def _procesar_recurrentes(hoy: date, token: str) -> int:
             continue  # Otro proceso ya procesó este recurrente hoy
         chat_id = int(r["usuario_id"])
         sufijo = {1: "ro", 2: "do", 3: "ro"}.get(hoy.day, "to")
-        await _send_telegram(
-            chat_id,
-            f"🔁 Recordatorio del {hoy.day}{sufijo} del mes:\n"
-            f"*{r['descripcion']}* — ${r['monto']:,.0f}\n¿Lo registro hoy?",
-            token,
-            reply_markup=_recurrente_keyboard(r["id"]),
-        )
-        enviados += 1
+        try:
+            await _send_telegram(
+                chat_id,
+                f"🔁 Recordatorio del {hoy.day}{sufijo} del mes:\n"
+                f"*{r['descripcion']}* — ${r['monto']:,.0f}\n¿Lo registro hoy?",
+                token,
+                reply_markup=_recurrente_keyboard(r["id"]),
+            )
+            enviados += 1
+        except Exception:
+            pass  # No cortar el loop si falla un envío individual
     return enviados
 
 
@@ -79,6 +82,7 @@ async def _enviar_resumen_semanal(hoy: date, token: str) -> int:
         supabase.table("movimientos")
         .select("usuario_id, monto, tipo, categorias(nombre, emoji)")
         .in_("usuario_id", uids)
+        .neq("estado", "anulado")
         .gte("fecha", inicio.isoformat())
         .lte("fecha", fin.isoformat())
         .execute()

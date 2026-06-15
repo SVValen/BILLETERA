@@ -3,22 +3,14 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import calendar
 from datetime import date
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from lib.supabase_client import get_supabase
 from lib.auth import get_telegram_id_from_request
+from lib.date_utils import add_months
 
 app = FastAPI()
-
-
-def _add_months(d: date, n: int) -> date:
-    month = d.month - 1 + n
-    year = d.year + month // 12
-    month = month % 12 + 1
-    day = min(d.day, calendar.monthrange(year, month)[1])
-    return date(year, month, day)
 
 
 @app.get("/api/cuotas")
@@ -48,7 +40,7 @@ async def get_cuotas(request: Request):
         pagadas = min(meses_transcurridos + 1, n)
         restantes = n - pagadas
 
-        prox = _add_months(primera, pagadas) if restantes > 0 else None
+        prox = add_months(primera, pagadas) if restantes > 0 else None
 
         cat = p.get("categorias") or {}
         result.append({

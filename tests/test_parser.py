@@ -10,7 +10,8 @@ from lib.parser import (
     parse_recurrente,
     parse_cuotas,
 )
-from lib.date_utils import mes_rango
+from lib.date_utils import mes_rango, validate_mes, add_months
+from datetime import date
 
 
 # ── parse_movement ─────────────────────────────────────────────────────────────
@@ -166,3 +167,50 @@ class TestMesRango:
         start, end = mes_rango("2026-01")
         assert start == "2026-01-01"
         assert end == "2026-02-01"
+
+
+# ── validate_mes ───────────────────────────────────────────────────────────────
+
+class TestValidateMes:
+    def test_formato_valido(self):
+        assert validate_mes("2026-06") is True
+
+    def test_mes_01(self):
+        assert validate_mes("2026-01") is True
+
+    def test_mes_12(self):
+        assert validate_mes("2026-12") is True
+
+    def test_mes_13_invalido(self):
+        assert validate_mes("2026-13") is False
+
+    def test_mes_00_invalido(self):
+        assert validate_mes("2026-00") is False
+
+    def test_formato_incorrecto(self):
+        assert validate_mes("invalid") is False
+
+    def test_formato_sin_guion(self):
+        assert validate_mes("202606") is False
+
+    def test_vacio(self):
+        assert validate_mes("") is False
+
+
+# ── add_months ─────────────────────────────────────────────────────────────────
+
+class TestAddMonths:
+    def test_mes_normal(self):
+        assert add_months(date(2026, 3, 15), 1) == date(2026, 4, 15)
+
+    def test_salto_de_anio(self):
+        assert add_months(date(2026, 12, 1), 1) == date(2027, 1, 1)
+
+    def test_dia_31_a_mes_corto(self):
+        assert add_months(date(2026, 1, 31), 1) == date(2026, 2, 28)
+
+    def test_cero_meses(self):
+        assert add_months(date(2026, 6, 15), 0) == date(2026, 6, 15)
+
+    def test_multiples_meses(self):
+        assert add_months(date(2026, 1, 1), 12) == date(2027, 1, 1)

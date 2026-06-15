@@ -43,7 +43,7 @@ interface Recurrente {
   dias_faltan: number
 }
 
-export default function ResumenTab({ telegramId, mes }: { telegramId: string; mes: string }) {
+export default function ResumenTab({ mes }: { mes: string }) {
   const [stats, setStats] = useState<Stats | null>(null)
   const [cuotas, setCuotas] = useState<Cuota[]>([])
   const [recurrentes, setRecurrentes] = useState<Recurrente[]>([])
@@ -69,7 +69,7 @@ export default function ResumenTab({ telegramId, mes }: { telegramId: string; me
     } finally {
       setLoading(false)
     }
-  }, [mes, telegramId])
+  }, [mes])
 
   useEffect(() => { fetchData() }, [fetchData])
 
