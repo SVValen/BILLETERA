@@ -22,7 +22,10 @@ async def get_movements(request: Request):
 
     mes = request.query_params.get("mes", "")
     q = request.query_params.get("q", "").strip()
-    pagina = max(1, int(request.query_params.get("pagina", "1")))
+    try:
+        pagina = max(1, int(request.query_params.get("pagina", "1")))
+    except ValueError:
+        pagina = 1
     todos = request.query_params.get("todos", "")
     tipo = request.query_params.get("tipo", "").strip()
     categoria_id = request.query_params.get("categoria_id", "").strip()

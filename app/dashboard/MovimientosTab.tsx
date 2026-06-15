@@ -41,6 +41,7 @@ const CATEGORIAS = [
 export default function MovimientosTab({ telegramId, mes }: { telegramId: string; mes: string }) {
   const [movements, setMovements] = useState<Movement[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [pagina, setPagina] = useState(1)
   const [paginas, setPaginas] = useState(1)
   const [total, setTotal] = useState(0)
@@ -51,16 +52,23 @@ export default function MovimientosTab({ telegramId, mes }: { telegramId: string
 
   const fetch_ = useCallback(async () => {
     setLoading(true)
-    const params = new URLSearchParams({ mes, pagina: String(pagina) })
-    if (q) params.set('q', q)
-    if (filtroTipo !== 'todos') params.set('tipo', filtroTipo)
-    if (filtroCategoria) params.set('categoria_id', filtroCategoria)
-    const r = await fetchWithAuth(`/api/movements?${params}`)
-    const data = await r.json()
-    setMovements(data.data || [])
-    setTotal(data.total || 0)
-    setPaginas(data.paginas || 1)
-    setLoading(false)
+    setError(null)
+    try {
+      const params = new URLSearchParams({ mes, pagina: String(pagina) })
+      if (q) params.set('q', q)
+      if (filtroTipo !== 'todos') params.set('tipo', filtroTipo)
+      if (filtroCategoria) params.set('categoria_id', filtroCategoria)
+      const r = await fetchWithAuth(`/api/movements?${params}`)
+      if (!r.ok) throw new Error('Error al cargar movimientos')
+      const data = await r.json()
+      setMovements(data.data || [])
+      setTotal(data.total || 0)
+      setPaginas(data.paginas || 1)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Error desconocido')
+    } finally {
+      setLoading(false)
+    }
   }, [mes, pagina, q, filtroTipo, filtroCategoria])
 
   useEffect(() => {
@@ -118,7 +126,9 @@ export default function MovimientosTab({ telegramId, mes }: { telegramId: string
 
       {/* Tabla */}
       <div className="table-box">
-        {loading ? (
+        {error ? (
+          <div className="error-banner">{error} <button className="btn-ghost" onClick={fetch_}>Reintentar</button></div>
+        ) : loading ? (
           <p className="loading">Cargando...</p>
         ) : movements.length === 0 ? (
           <p className="empty">Sin movimientos{q ? ` para "${q}"` : ''} este mes.</p>

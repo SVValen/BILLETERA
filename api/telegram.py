@@ -722,6 +722,7 @@ async def telegram_webhook(request: Request):
         payload = cq.get("data", "")
         chat_id = cq["message"]["chat"]["id"]
         message_id = cq["message"]["message_id"]
+        callback_user_id = str(cq["from"]["id"])
         supabase = get_supabase()
         parts = payload.split(":")
 
@@ -729,7 +730,7 @@ async def telegram_webhook(request: Request):
             movement_id, cat_id = int(parts[1]), int(parts[2])
             supabase.table("movimientos").update(
                 {"categoria_id": cat_id, "estado": "confirmado"}
-            ).eq("id", movement_id).execute()
+            ).eq("id", movement_id).eq("usuario_id", callback_user_id).execute()
             cat_row = supabase.table("categorias").select("nombre, emoji").eq("id", cat_id).single().execute()
             cat_name = cat_row.data.get("nombre", "?") if cat_row.data else "?"
             cat_emoji = cat_row.data.get("emoji", "📌") if cat_row.data else "📌"
@@ -749,7 +750,7 @@ async def telegram_webhook(request: Request):
 
         elif parts[0] == "monto_ok" and len(parts) == 2:
             movement_id = int(parts[1])
-            supabase.table("movimientos").update({"estado": "confirmado"}).eq("id", movement_id).execute()
+            supabase.table("movimientos").update({"estado": "confirmado"}).eq("id", movement_id).eq("usuario_id", callback_user_id).execute()
             row = supabase.table("movimientos").select("monto, usuario_id, categoria_id, categorias(nombre, emoji)").eq("id", movement_id).single().execute()
             monto = row.data["monto"] if row.data else 0
             cat = (row.data.get("categorias") or {}) if row.data else {}
@@ -765,7 +766,7 @@ async def telegram_webhook(request: Request):
 
         elif parts[0] == "monto_x1000" and len(parts) == 2:
             movement_id = int(parts[1])
-            row = supabase.table("movimientos").select("monto, tipo, descripcion, usuario_id, categorias(nombre, emoji)").eq("id", movement_id).single().execute()
+            row = supabase.table("movimientos").select("monto, tipo, descripcion, usuario_id, categorias(nombre, emoji)").eq("id", movement_id).eq("usuario_id", callback_user_id).single().execute()
             if row.data:
                 nuevo_monto = row.data["monto"] * 1000
                 tipo = row.data["tipo"]
@@ -776,7 +777,7 @@ async def telegram_webhook(request: Request):
                     "monto": nuevo_monto,
                     "categoria_id": categoria_id,
                     "estado": "confirmado" if categoria_id != 7 else "pendiente_categoria",
-                }).eq("id", movement_id).execute()
+                }).eq("id", movement_id).eq("usuario_id", callback_user_id).execute()
                 if token:
                     await _answer_callback(callback_id, token)
                     if categoria_id == 7 and tipo == "gasto":
@@ -795,6 +796,11 @@ async def telegram_webhook(request: Request):
 
         elif parts[0] == "cuota_fecha" and len(parts) == 3:
             plan_id, proximo = int(parts[1]), int(parts[2])
+            plan_check = supabase.table("cuotas_plan").select("usuario_id").eq("id", plan_id).single().execute()
+            if not plan_check.data or plan_check.data["usuario_id"] != callback_user_id:
+                if token:
+                    await _answer_callback(callback_id, token)
+                return JSONResponse({"ok": True})
             hoy = date.today()
             # Si el usuario elige "este mes" pero ya pasó el día 1, usar el mes siguiente
             meses = proximo if (proximo > 0 or hoy.day == 1) else 1
@@ -808,6 +814,10 @@ async def telegram_webhook(request: Request):
         elif parts[0] == "recurrente_si" and len(parts) == 2:
             rec_id = int(parts[1])
             rec = supabase.table("recurrentes").select("*").eq("id", rec_id).single().execute()
+            if rec.data and rec.data["usuario_id"] != callback_user_id:
+                if token:
+                    await _answer_callback(callback_id, token)
+                return JSONResponse({"ok": True})
             if rec.data:
                 r = rec.data
                 supabase.table("movimientos").insert({
@@ -837,7 +847,7 @@ async def telegram_webhook(request: Request):
             rec_id = int(parts[1])
             supabase.table("recurrentes").update(
                 {"ultimo_recordatorio": date.today().isoformat()}
-            ).eq("id", rec_id).execute()
+            ).eq("id", rec_id).eq("usuario_id", callback_user_id).execute()
             if token:
                 await _answer_callback(callback_id, token)
                 await _edit_message(chat_id, message_id, "⏭ Saltado por hoy.", token)
@@ -845,7 +855,7 @@ async def telegram_webhook(request: Request):
         # Seleccionar movimiento para editar → submenu
         elif parts[0] == "edit" and len(parts) == 2:
             movement_id = int(parts[1])
-            row = supabase.table("movimientos").select("descripcion, monto, tipo").eq("id", movement_id).single().execute()
+            row = supabase.table("movimientos").select("descripcion, monto, tipo").eq("id", movement_id).eq("usuario_id", callback_user_id).single().execute()
             if row.data and token:
                 r = row.data
                 signo = "-" if r["tipo"] == "gasto" else "+"
@@ -860,8 +870,8 @@ async def telegram_webhook(request: Request):
             movement_id = int(parts[1])
             supabase.table("movimientos").update(
                 {"estado": "pendiente_edicion_monto"}
-            ).eq("id", movement_id).execute()
-            row = supabase.table("movimientos").select("descripcion").eq("id", movement_id).single().execute()
+            ).eq("id", movement_id).eq("usuario_id", callback_user_id).execute()
+            row = supabase.table("movimientos").select("descripcion").eq("id", movement_id).eq("usuario_id", callback_user_id).single().execute()
             desc = row.data["descripcion"] if row.data else "?"
             if token:
                 await _answer_callback(callback_id, token)
@@ -871,7 +881,7 @@ async def telegram_webhook(request: Request):
         # Editar categoría: mostrar teclado de categorías
         elif parts[0] == "edit_cat" and len(parts) == 2:
             movement_id = int(parts[1])
-            row = supabase.table("movimientos").select("descripcion").eq("id", movement_id).single().execute()
+            row = supabase.table("movimientos").select("descripcion").eq("id", movement_id).eq("usuario_id", callback_user_id).single().execute()
             desc = row.data["descripcion"] if row.data else "?"
             if token:
                 await _answer_callback(callback_id, token)
@@ -883,7 +893,7 @@ async def telegram_webhook(request: Request):
         # Borrar: pedir confirmación
         elif parts[0] == "del" and len(parts) == 2:
             movement_id = int(parts[1])
-            row = supabase.table("movimientos").select("descripcion, monto, tipo").eq("id", movement_id).single().execute()
+            row = supabase.table("movimientos").select("descripcion, monto, tipo").eq("id", movement_id).eq("usuario_id", callback_user_id).single().execute()
             if row.data and token:
                 r = row.data
                 signo = "-" if r["tipo"] == "gasto" else "+"
@@ -896,8 +906,8 @@ async def telegram_webhook(request: Request):
         # Confirmar borrado
         elif parts[0] == "del_ok" and len(parts) == 2:
             movement_id = int(parts[1])
-            row = supabase.table("movimientos").select("descripcion, monto").eq("id", movement_id).single().execute()
-            supabase.table("movimientos").delete().eq("id", movement_id).execute()
+            row = supabase.table("movimientos").select("descripcion, monto").eq("id", movement_id).eq("usuario_id", callback_user_id).single().execute()
+            supabase.table("movimientos").delete().eq("id", movement_id).eq("usuario_id", callback_user_id).execute()
             if token:
                 await _answer_callback(callback_id, token)
                 desc = row.data["descripcion"] if row.data else "?"
