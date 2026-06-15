@@ -95,17 +95,14 @@ async def update_objetivo(request: Request):
     supabase = get_supabase()
 
     if "aporte" in body:
-        obj = (
-            supabase.table("objetivos_ahorro")
-            .select("monto_actual")
-            .eq("id", int(id_))
-            .eq("usuario_id", telegram_id)
-            .execute()
-        )
-        if not obj.data:
+        # RPC atómica: evita race condition del read-modify-write
+        r = supabase.rpc("incrementar_objetivo", {
+            "obj_id": int(id_),
+            "p_usuario": telegram_id,
+            "incremento": float(body["aporte"]),
+        }).execute()
+        if not r.data:
             return JSONResponse({"error": "No encontrado"}, status_code=404)
-        nuevo = obj.data[0]["monto_actual"] + float(body["aporte"])
-        r = supabase.table("objetivos_ahorro").update({"monto_actual": nuevo}).eq("id", int(id_)).eq("usuario_id", telegram_id).execute()
     else:
         update_data = {k: v for k, v in body.items() if k in ("nombre", "monto_objetivo", "fecha_objetivo")}
         r = supabase.table("objetivos_ahorro").update(update_data).eq("id", int(id_)).eq("usuario_id", telegram_id).execute()

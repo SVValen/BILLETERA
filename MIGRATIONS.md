@@ -11,6 +11,8 @@ Aplicar en Supabase → SQL Editor en este orden:
 | 5 | `schema_phase2.sql` | Tabla `presupuestos`, tabla `cuotas_plan`, tabla `keywords_aprendidas`, tabla `objetivos_ahorro` |
 | 6 | `schema_recurrentes.sql` | Tabla `recurrentes` (gastos recurrentes mensuales) |
 | 7 | `schema_suscripciones.sql` | Agrega categoría Suscripciones (id=18) |
+| 8 | `schema_rls_policies.sql` | Reemplaza policies permisivas por policies que filtran por `auth_telegram_id()` |
+| 9 | `schema_atomic_aporte.sql` | Función RPC `incrementar_objetivo` para aporte atómico sin race condition |
 
 ## Cómo aplicar en un ambiente nuevo
 

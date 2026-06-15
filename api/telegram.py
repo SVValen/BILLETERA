@@ -13,6 +13,7 @@ from lib.parser import (
     parse_movement, categorize_from_keywords,
     parse_recurrente, parse_cuotas, strip_recurrente, strip_cuotas,
 )
+from lib.date_utils import mes_rango
 
 app = FastAPI()
 
@@ -260,13 +261,6 @@ async def _get_dolar_oficial() -> float | None:
 
 # ── Presupuesto helpers ───────────────────────────────────────────────────────
 
-def _mes_rango(mes: str) -> tuple[str, str]:
-    year, month = int(mes[:4]), int(mes[5:7])
-    start = f"{year}-{month:02d}-01"
-    end = f"{year + 1}-01-01" if month == 12 else f"{year}-{month + 1:02d}-01"
-    return start, end
-
-
 async def _check_presupuesto_alert(
     *, usuario_id: str, categoria_id: int, chat_id: int, token: str
 ) -> None:
@@ -287,7 +281,7 @@ async def _check_presupuesto_alert(
         return
 
     presupuestado = pres.data[0]["monto"]
-    start, end = _mes_rango(mes)
+    start, end = mes_rango(mes)
     gastos = (
         supabase.table("movimientos")
         .select("monto")
@@ -372,7 +366,7 @@ async def _handle_presupuesto_cmd(user_id: str, chat_id: int, args: str, token: 
             "Configurá uno con:\n`/presupuesto comida 20000`", token)
         return
 
-    start, end = _mes_rango(mes)
+    start, end = mes_rango(mes)
     mov_rows = (
         supabase.table("movimientos")
         .select("categoria_id, monto")
@@ -802,7 +796,9 @@ async def telegram_webhook(request: Request):
         elif parts[0] == "cuota_fecha" and len(parts) == 3:
             plan_id, proximo = int(parts[1]), int(parts[2])
             hoy = date.today()
-            primer_fecha = _first_of_month(_add_months(hoy, proximo))
+            # Si el usuario elige "este mes" pero ya pasó el día 1, usar el mes siguiente
+            meses = proximo if (proximo > 0 or hoy.day == 1) else 1
+            primer_fecha = _first_of_month(_add_months(hoy, meses))
             if token:
                 await _answer_callback(callback_id, token)
                 await _edit_message(chat_id, message_id,

@@ -40,9 +40,16 @@ async def _procesar_recurrentes(hoy: date, token: str) -> int:
     )
     enviados = 0
     for r in (rows.data or []):
-        ultimo = r.get("ultimo_recordatorio")
-        if ultimo and ultimo >= hoy.isoformat():
-            continue
+        # Atomic claim: solo actualiza si no fue procesado hoy; previene duplicados en retries
+        claim = (
+            supabase.table("recurrentes")
+            .update({"ultimo_recordatorio": hoy.isoformat()})
+            .eq("id", r["id"])
+            .or_(f"ultimo_recordatorio.is.null,ultimo_recordatorio.lt.{hoy.isoformat()}")
+            .execute()
+        )
+        if not claim.data:
+            continue  # Otro proceso ya procesó este recurrente hoy
         chat_id = int(r["usuario_id"])
         sufijo = {1: "ro", 2: "do", 3: "ro"}.get(hoy.day, "to")
         await _send_telegram(

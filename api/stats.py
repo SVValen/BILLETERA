@@ -7,15 +7,9 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from lib.supabase_client import get_supabase
 from lib.auth import get_telegram_id_from_request
+from lib.date_utils import mes_rango
 
 app = FastAPI()
-
-
-def _mes_rango(mes: str) -> tuple[str, str]:
-    year, month = int(mes[:4]), int(mes[5:7])
-    start = f"{year}-{month:02d}-01"
-    end = f"{year + 1}-01-01" if month == 12 else f"{year}-{month + 1:02d}-01"
-    return start, end
 
 
 @app.get("/api/stats")
@@ -28,7 +22,7 @@ async def get_stats(request: Request):
     if not mes:
         return JSONResponse({"error": "Falta parámetro 'mes'"}, status_code=400)
 
-    start, end = _mes_rango(mes)
+    start, end = mes_rango(mes)
     supabase = get_supabase()
 
     response = (
