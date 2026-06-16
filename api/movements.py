@@ -7,7 +7,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from lib.supabase_client import get_supabase
 from lib.auth import get_telegram_id_from_request
-from lib.date_utils import mes_rango
+from lib.date_utils import mes_rango, validate_mes
 
 app = FastAPI()
 
@@ -41,6 +41,8 @@ async def get_movements(request: Request):
     )
 
     if mes:
+        if not validate_mes(mes):
+            return JSONResponse({"error": "Formato de mes inválido (YYYY-MM)"}, status_code=400)
         start, end = mes_rango(mes)
         query = query.gte("fecha", start).lt("fecha", end)
 

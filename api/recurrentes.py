@@ -32,7 +32,10 @@ async def get_recurrentes_proximos(request: Request):
     if err:
         return err
 
-    dias = int(request.query_params.get("dias", "35"))
+    try:
+        dias = max(1, int(request.query_params.get("dias", "35")))
+    except ValueError:
+        dias = 35
     supabase = get_supabase()
     rows = (
         supabase.table("recurrentes")
@@ -48,6 +51,8 @@ async def get_recurrentes_proximos(request: Request):
     result = []
     for r in (rows.data or []):
         prox = _next_occurrence(r["dia_del_mes"], hoy)
+        if prox > horizonte:
+            continue
         cat = r.get("categorias") or {}
         result.append({
             "id": r["id"],

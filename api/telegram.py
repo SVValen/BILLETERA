@@ -164,9 +164,7 @@ async def _recent_movements_keyboard(
     if q:
         query = query.ilike("descripcion", f"%{q}%")
     if mes:
-        start = f"{mes}-01"
-        year, month = int(mes[:4]), int(mes[5:7])
-        end = f"{year + 1}-01-01" if month == 12 else f"{year}-{month + 1:02d}-01"
+        start, end = mes_rango(mes)
         query = query.gte("fecha", start).lt("fecha", end)
     if not q:
         query = query.limit(limit)
