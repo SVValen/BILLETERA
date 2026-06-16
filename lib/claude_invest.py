@@ -323,8 +323,8 @@ def formatear_mensaje_telegram(activo: dict, rec: dict, recomendacion_id: int) -
 
     reply_markup = {
         "inline_keyboard": [[
-            {"text": "✅ Aceptar", "callback_data": f"inv_ok_{recomendacion_id}"},
-            {"text": "❌ Rechazar", "callback_data": f"inv_no_{recomendacion_id}"},
+            {"text": "✅ Aceptar", "callback_data": f"inv_ok:{recomendacion_id}"},
+            {"text": "❌ Rechazar", "callback_data": f"inv_no:{recomendacion_id}"},
         ]]
     }
 
