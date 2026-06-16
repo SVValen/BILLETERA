@@ -71,14 +71,14 @@ async def _iol_get_token() -> str | None:
 async def fetch_iol_precio(simbolo: str) -> dict | None:
     """
     Retorna precio actual de un CEDEAR o acción argentina vía IOL.
-    Intenta endpoint individual primero (rápido), cae al batch si falla.
+    Usa el endpoint individual /bCBA/Titulos/{simbolo}/Cotizacion.
+    Campos reales confirmados: ultimoPrecio, variacion (no variacionPorcentual).
     {precio, moneda, variacion_pct}
     """
     token = await _iol_get_token()
     if not token:
         return None
 
-    # Intentar endpoint individual
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             r = await client.get(
@@ -87,32 +87,15 @@ async def fetch_iol_precio(simbolo: str) -> dict | None:
             )
             if r.status_code == 200:
                 data = r.json()
-                precio = data.get("ultimoPrecio") or data.get("ultimo") or data.get("price")
-                variacion = data.get("variacionPorcentual") or data.get("variation") or 0
+                precio = data.get("ultimoPrecio") or data.get("ultimo")
+                variacion = data.get("variacion") or 0
                 if precio:
                     return {"precio": float(precio), "moneda": "ARS", "variacion_pct": float(variacion)}
-            logger.debug(f"IOL individual {simbolo} status={r.status_code}, intentando batch")
+                logger.warning(f"IOL {simbolo}: precio ausente en respuesta — keys: {list(data.keys())}")
+            else:
+                logger.warning(f"IOL individual {simbolo}: status {r.status_code}")
     except Exception as e:
-        logger.debug(f"IOL individual {simbolo}: {e}, intentando batch")
-
-    # Fallback: endpoint batch de CEDEARs
-    try:
-        async with httpx.AsyncClient(timeout=15) as client:
-            r = await client.get(
-                f"{IOL_BASE}/api/v2/Cotizaciones/acciones/cedears/bCBA",
-                headers={"Authorization": f"Bearer {token}"},
-            )
-            r.raise_for_status()
-            data = r.json()
-            for t in data.get("titulos", []):
-                if t.get("simbolo", "").upper() == simbolo.upper():
-                    return {
-                        "precio": float(t.get("ultimoPrecio", 0)),
-                        "moneda": "ARS",
-                        "variacion_pct": float(t.get("variacionPorcentual", 0)),
-                    }
-    except Exception as e:
-        logger.error(f"IOL batch {simbolo}: {e}")
+        logger.error(f"IOL precio {simbolo}: {e}")
     return None
 
 
