@@ -129,8 +129,8 @@ async def cron_inversiones(request: Request):
         if actualizado:
             activos_actualizados[activo["id"]] = actualizado
 
-    # 2. Para cada usuario con perfil, evaluar señales
-    perfiles_r = supabase.table("perfiles_inversion").select("*").execute()
+    # 2. Para cada usuario con perfil activo, evaluar señales solo en sus activos
+    perfiles_r = supabase.table("perfiles_inversion").select("*").eq("estado", "activo").execute()
     perfiles = perfiles_r.data or []
 
     recomendaciones_generadas = 0
@@ -139,7 +139,14 @@ async def cron_inversiones(request: Request):
         usuario_id = perfil["usuario_id"]
         winrate = await _calcular_winrate(usuario_id, supabase)
 
+        # Activos que el usuario seleccionó monitorear
+        ua_r = supabase.table("usuario_activos").select("activo_id").eq("usuario_id", usuario_id).execute()
+        activos_usuario = {row["activo_id"] for row in (ua_r.data or [])}
+
         for activo_id, activo in activos_actualizados.items():
+            if activo_id not in activos_usuario:
+                continue
+
             rsi = activo.get("rsi")
             tendencia = activo.get("tendencia", "lateral")
 

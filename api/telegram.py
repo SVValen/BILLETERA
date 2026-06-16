@@ -201,12 +201,15 @@ async def _send(chat_id: int, text: str, token: str,
         return r.json()
 
 
-async def _answer_callback(callback_id: str, token: str) -> None:
+async def _answer_callback(callback_id: str, token: str, text: str | None = None) -> None:
     import httpx
+    payload: dict = {"callback_query_id": callback_id}
+    if text:
+        payload["text"] = text
     async with httpx.AsyncClient() as client:
         await client.post(
             f"https://api.telegram.org/bot{token}/answerCallbackQuery",
-            json={"callback_query_id": callback_id},
+            json=payload,
         )
 
 
@@ -317,6 +320,46 @@ async def _check_presupuesto_alert(
             f"⚠️ {c['emoji']} *{c['nombre']}*: {pct:.0f}% del presupuesto\n"
             f"Quedan: ${presupuestado - total:,.0f}",
             token, parse_mode="Markdown")
+
+
+async def _send_activos_keyboard(user_id: str, chat_id: int, token: str, supabase=None, edit_message_id: int | None = None) -> None:
+    """Envía (o edita) el teclado de selección de activos. Marca los ya seleccionados."""
+    if supabase is None:
+        supabase = get_supabase()
+
+    activos_r = supabase.table("activos").select("id, codigo, nombre, tipo").eq("activo", True).execute()
+    todos = activos_r.data or []
+
+    seleccionados_r = supabase.table("usuario_activos").select("activo_id").eq("usuario_id", user_id).execute()
+    seleccionados = {row["activo_id"] for row in (seleccionados_r.data or [])}
+
+    def _label(a: dict) -> str:
+        check = "✅" if a["id"] in seleccionados else "⬜"
+        tipo_icon = {"crypto": "₿", "cedear": "🏢", "accion_ar": "🇦🇷", "dolar": "💵"}.get(a["tipo"], "")
+        return f"{check} {tipo_icon} {a['codigo']}"
+
+    rows = []
+    for i in range(0, len(todos), 2):
+        fila = []
+        for activo in todos[i:i+2]:
+            fila.append({
+                "text": _label(activo),
+                "callback_data": f"inv_toggle:{activo['id']}",
+            })
+        rows.append(fila)
+
+    rows.append([{"text": "✔️ Confirmar selección", "callback_data": "inv_confirmar_activos"}])
+
+    texto = (
+        "📊 *¿Qué activos querés monitorear?*\n"
+        "_Tocá para marcar/desmarcar. Podés cambiar esto en cualquier momento._"
+    )
+    reply_markup = {"inline_keyboard": rows}
+
+    if edit_message_id:
+        await _edit_message(chat_id, edit_message_id, texto, token, reply_markup=reply_markup)
+    else:
+        await _send(chat_id, texto, token, reply_markup=reply_markup)
 
 
 async def _handle_inversiones_cmd(user_id: str, chat_id: int, token: str) -> None:
@@ -1049,6 +1092,39 @@ async def telegram_webhook(request: Request):
                     await _answer_callback(callback_id, token)
                     await _edit_message(chat_id, message_id, "❌ Recomendación rechazada.", token)
 
+        # Toggle de activo en selección de activos
+        elif parts[0] == "inv_toggle" and len(parts) == 2:
+            activo_id = int(parts[1])
+            existe_r = supabase.table("usuario_activos").select("id").eq("usuario_id", callback_user_id).eq("activo_id", activo_id).limit(1).execute()
+            if existe_r.data:
+                supabase.table("usuario_activos").delete().eq("usuario_id", callback_user_id).eq("activo_id", activo_id).execute()
+            else:
+                supabase.table("usuario_activos").insert({"usuario_id": callback_user_id, "activo_id": activo_id}).execute()
+
+            if token:
+                await _answer_callback(callback_id, token)
+            # Editar el mismo mensaje para actualizar los checkmarks
+            await _send_activos_keyboard(callback_user_id, chat_id, token, supabase, edit_message_id=message_id)
+
+        # Confirmar selección de activos
+        elif parts[0] == "inv_confirmar_activos":
+            seleccionados_r = supabase.table("usuario_activos").select("activo_id").eq("usuario_id", callback_user_id).execute()
+            n = len(seleccionados_r.data or [])
+            if n == 0:
+                if token:
+                    await _answer_callback(callback_id, token, text="Seleccioná al menos un activo")
+            else:
+                supabase.table("perfiles_inversion").update({
+                    "estado": "activo",
+                    "actualizado_at": "now()",
+                }).eq("usuario_id", callback_user_id).execute()
+                if token:
+                    await _answer_callback(callback_id, token)
+                    await _edit_message(chat_id, message_id,
+                        f"✅ *Perfil listo*\nVas a recibir señales para los {n} activo{'s' if n != 1 else ''} seleccionados.\n\n"
+                        "Usá /inversiones para ver el estado en cualquier momento.",
+                        token)
+
         return JSONResponse({"ok": True})
 
     # ── Mensajes ───────────────────────────────────────────────────────────────
@@ -1085,28 +1161,27 @@ async def telegram_webhook(request: Request):
     if token and not text.startswith("/"):
         supabase_check = get_supabase()
         perfil_check = supabase_check.table("perfiles_inversion").select("estado").eq("usuario_id", user_id).limit(1).execute()
-        if perfil_check.data and perfil_check.data[0].get("estado") == "configurando_capital":
-            if text.lower() == "/skip" or text.lower() == "skip":
-                supabase_check.table("perfiles_inversion").update({"estado": "activo"}).eq("usuario_id", user_id).execute()
-                await _send(chat_id, "✅ Perfil configurado. Vas a recibir recomendaciones cuando haya señales.", token)
+        estado_perfil = perfil_check.data[0].get("estado") if perfil_check.data else None
+
+        if estado_perfil == "configurando_capital":
+            clean = text.replace(".", "").replace(",", "").replace("$", "").strip()
+            if text.lower() in ("skip", "/skip"):
+                capital = None
             else:
-                # Intentar parsear como número
-                clean = text.replace(".", "").replace(",", "").replace("$", "").strip()
                 try:
                     capital = float(clean)
-                    supabase_check.table("perfiles_inversion").update({
-                        "capital_disponible": capital,
-                        "estado": "activo",
-                        "actualizado_at": "now()",
-                    }).eq("usuario_id", user_id).execute()
-                    await _send(chat_id,
-                        f"✅ *Perfil completo*\n"
-                        f"💰 Capital: ${capital:,.0f}\n\n"
-                        "El sistema va a analizar activos cada 30 minutos y te va a avisar cuando haya señales.\n"
-                        "Usá /inversiones para ver el estado en cualquier momento.", token)
                 except ValueError:
                     await _send(chat_id,
                         "No entendí el monto. Enviá solo el número (ej: `500000`) o escribí `skip` para omitirlo.", token)
+                    return JSONResponse({"ok": True})
+
+            upd: dict = {"estado": "configurando_activos", "actualizado_at": "now()"}
+            if capital is not None:
+                upd["capital_disponible"] = capital
+            supabase_check.table("perfiles_inversion").update(upd).eq("usuario_id", user_id).execute()
+
+            # Pasar al paso de selección de activos
+            await _send_activos_keyboard(user_id, chat_id, token, supabase_check)
             return JSONResponse({"ok": True})
 
     if text.startswith("/id"):
