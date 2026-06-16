@@ -1,0 +1,16 @@
+name: Cron Outcomes Inversiones
+
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Actualizar resultados de decisiones
+        run: |
+          curl -sf -X GET \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            https://billetera-gamma.vercel.app/api/cron-inversiones/outcomes

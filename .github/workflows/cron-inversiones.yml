@@ -1,0 +1,16 @@
+name: Cron Inversiones
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch: # permite dispararlo manualmente desde GitHub
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Actualizar precios y generar recomendaciones
+        run: |
+          curl -sf -X GET \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            https://billetera-gamma.vercel.app/api/cron-inversiones
