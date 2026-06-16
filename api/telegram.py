@@ -484,15 +484,12 @@ async def _handle_precios_cmd(chat_id: int, token: str) -> None:
 
     lines = ["📊 *Precios de mercado*\n"]
 
-    # BTC via CoinGecko (Binance bloquea Vercel con 451)
+    # BTC via CoinGecko
     try:
         btc = await fetch_coingecko_precio("BTCUSDT")
-        if btc:
-            lines.append(f"₿ *BTC* — ${btc['precio']:,.0f} USD")
-        else:
-            lines.append("₿ *BTC* — ❌ sin datos")
-    except Exception as e:
-        lines.append(f"₿ *BTC* — ❌ {e}")
+        lines.append(f"₿ *BTC* — ${btc['precio']:,.0f} USD" if btc else "₿ *BTC* — sin datos")
+    except Exception:
+        lines.append("₿ *BTC* — error")
 
     # ETH via CoinGecko
     try:
@@ -508,38 +505,29 @@ async def _handle_precios_cmd(chat_id: int, token: str) -> None:
     for tipo, label in [("oficial", "Oficial"), ("blue", "Blue"), ("cripto", "Cripto")]:
         try:
             d = await fetch_dolar_precio(tipo)
-            if d:
-                lines.append(f"💵 *{label}* — ${d['precio']:,.2f} ARS")
-            else:
-                lines.append(f"💵 *{label}* — ❌ sin datos")
-        except Exception as e:
-            lines.append(f"💵 *{label}* — ❌ {e}")
+            lines.append(f"💵 *{label}* — ${d['precio']:,.2f} ARS" if d else f"💵 {label} — sin datos")
+        except Exception:
+            lines.append(f"💵 {label} — error")
 
     lines.append("")
 
-    # IOL debug (AAPL como prueba)
+    # IOL (AAPL como prueba de conexión)
     try:
         iol = await fetch_iol_debug("AAPL")
         if not iol["token_ok"]:
-            lines.append(f"🏢 *IOL* — ❌ {iol.get('error', 'sin token')}")
+            lines.append("🏢 *IOL* — sin token (verificar IOL\\_USER / IOL\\_PASSWORD)")
         else:
             ind = iol.get("individual", {})
-            batch = iol.get("batch_sample", {})
             if ind.get("status") == 200 and isinstance(ind.get("body"), dict):
-                precio = ind["body"].get("ultimoPrecio") or ind["body"].get("ultimo") or "?"
+                body = ind["body"]
+                precio = body.get("ultimoPrecio") or body.get("ultimo") or body.get("price") or "?"
                 lines.append(f"🏢 *AAPL (CEDEAR)* — ${precio} ARS ✅")
-            elif batch.get("total_titulos", 0) > 0:
-                primeros = batch.get("primeros_3", [])
-                muestra = ", ".join(t.get("simbolo", "?") for t in primeros)
-                lines.append(f"🏢 *IOL batch* — ✅ {batch['total_titulos']} titulos ({muestra}...)")
-                lines.append(f"   _endpoint individual status: {ind.get('status', '?')}_")
             else:
-                lines.append(f"🏢 *IOL* — token ✅ pero sin datos")
-                lines.append(f"   _individual: {ind.get('status', '?')} | batch: {batch.get('status', '?')}_")
-    except Exception as e:
-        lines.append(f"🏢 *IOL* — ❌ {e}")
+                lines.append(f"🏢 *IOL* — token OK, AAPL status {ind.get('status', '?')}")
+    except Exception:
+        lines.append("🏢 *IOL* — error al consultar")
 
-    lines.append("\n_/iol\\_debug para ver respuesta completa de IOL_")
+    lines.append("\nUsá /iol\\_debug para ver respuesta completa de IOL")
     await _send(chat_id, "\n".join(lines), token)
 
 
