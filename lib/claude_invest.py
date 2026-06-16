@@ -11,6 +11,19 @@ logger = logging.getLogger(__name__)
 
 _client: Anthropic | None = None
 
+_OBJ_DESC = {
+    "ingresos_pasivos": "generar ingresos pasivos regulares",
+    "crecimiento":      "hacer crecer el capital a largo plazo",
+    "cobertura":        "protegerse de la inflación / preservar valor en dólares",
+    "meta_especifica":  "ahorrar para una meta específica",
+}
+
+_PLAZO_DESC = {
+    "corto":   "menos de 1 año",
+    "mediano": "entre 1 y 3 años",
+    "largo":   "más de 3 años",
+}
+
 
 def _get_client() -> Anthropic:
     global _client
@@ -52,11 +65,22 @@ def generar_recomendacion(
 
     winrate_txt = f"{winrate:.0f}%" if winrate is not None else "sin historial aún"
 
+    # Objetivos guardados como JSON array o string legacy
+    objetivos_raw = perfil.get("objetivos") or perfil.get("objetivo") or ""
+    if objetivos_raw and objetivos_raw.startswith("["):
+        try:
+            obj_list = json.loads(objetivos_raw)
+            objetivos_txt = " y ".join(_OBJ_DESC.get(o, o) for o in obj_list)
+        except Exception:
+            objetivos_txt = objetivos_raw
+    else:
+        objetivos_txt = _OBJ_DESC.get(objetivos_raw, objetivos_raw) or "no especificado"
+
     prompt = f"""Sos un asistente financiero personal en Argentina. Analizá este activo y generá una recomendación concreta.
 
 PERFIL DEL USUARIO:
 - Tipo: {perfil.get("perfil", "moderado")} — {perfil_desc}
-- Objetivo: {perfil.get("objetivo", "no especificado")}
+- Objetivos: {objetivos_txt}
 - Capital disponible: {perfil.get("capital_disponible", "no especificado")}
 - Winrate histórico: {winrate_txt}
 
@@ -90,7 +114,6 @@ Generá una recomendación ESPECÍFICA. Respondé SOLO en JSON válido, sin text
             messages=[{"role": "user", "content": prompt}],
         )
         text = response.content[0].text.strip()
-        # Extraer JSON si viene con texto extra
         if "```" in text:
             text = text.split("```")[1]
             if text.startswith("json"):
@@ -105,7 +128,7 @@ Generá una recomendación ESPECÍFICA. Respondé SOLO en JSON válido, sin text
 
 
 def sugerir_activos_para_perfil(
-    objetivo: str,
+    objetivos: list[str],
     plazo: str,
     capital: float | None,
     descripcion: str,
@@ -117,23 +140,16 @@ def sugerir_activos_para_perfil(
     Retorna:
     {
       "perfil_riesgo": "conservador" | "moderado" | "arriesgado",
-      "activos_sugeridos": ["BTC", "AAPL", ...],
-      "resumen": "texto breve para el usuario (1-2 oraciones)"
+      "activos_sugeridos": [
+        {"codigo": "BTC", "razon": "...", "explicacion": "..."},
+        ...
+      ],
+      "otros_disponibles": ["ETH", "GOOGL"],
+      "resumen": "texto breve para el usuario"
     }
     """
-    obj_desc = {
-        "ingresos_pasivos": "generar ingresos pasivos regulares",
-        "crecimiento": "hacer crecer el capital a largo plazo",
-        "cobertura": "protegerse de la inflación / preservar el valor en dólares",
-        "meta_especifica": "ahorrar para una meta específica",
-    }.get(objetivo, objetivo)
-
-    plazo_desc = {
-        "corto": "menos de 1 año",
-        "mediano": "entre 1 y 3 años",
-        "largo": "más de 3 años",
-    }.get(plazo, plazo)
-
+    obj_txt = " y ".join(_OBJ_DESC.get(o, o) for o in objetivos) if objetivos else "no especificado"
+    plazo_txt = _PLAZO_DESC.get(plazo, plazo or "no especificado")
     capital_txt = f"${capital:,.0f} ARS" if capital else "no especificado"
 
     activos_txt = "\n".join(
@@ -144,31 +160,98 @@ def sugerir_activos_para_perfil(
     prompt = f"""Sos un asesor financiero personal en Argentina. Un usuario está configurando su perfil de inversión.
 
 PERFIL DEL USUARIO:
-- Objetivo: {obj_desc}
-- Plazo: {plazo_desc}
+- Objetivos: {obj_txt}
+- Plazo: {plazo_txt}
 - Capital disponible: {capital_txt}
-- En sus propias palabras: "{descripcion}"
+- En sus propias palabras: "{descripcion or 'no especificó'}"
 
-ACTIVOS DISPONIBLES PARA MONITOREAR:
+ACTIVOS DISPONIBLES:
 {activos_txt}
 
 Tu tarea:
-1. Derivar el perfil de riesgo más apropiado (conservador/moderado/arriesgado) basado en sus objetivos y plazo.
-2. Seleccionar los activos más adecuados para su perfil (entre 2 y 5 activos).
-3. Escribir un resumen breve (máx 2 oraciones) explicando la lógica al usuario, en español informal.
+1. Derivar el perfil de riesgo (conservador/moderado/arriesgado).
+2. Seleccionar 2-4 activos principales. Para cada uno escribí:
+   - "razon": por qué encaja con sus objetivos (1 línea, informal)
+   - "explicacion": qué es y cómo funciona en el contexto argentino (2-3 oraciones simples, sin jerga)
+3. Listar otros activos disponibles no seleccionados que podrían interesarle (máx 3).
+4. Resumen general (1-2 oraciones, español informal).
 
-Consideraciones para Argentina:
-- CEDEARs y acciones AR son buenas para cobertura en ARS/USD
-- Crypto (BTC/ETH) para crecimiento con alta volatilidad
-- Para plazos cortos, evitar crypto y preferir cobertura
-- Para plazos largos, crypto + cedears es razonable
+Reglas para Argentina:
+- CEDEARs = acciones extranjeras que cotizan en pesos, buena cobertura cambiaria
+- Acciones AR = exposición local, más volátiles
+- BTC/ETH = cripto, alta volatilidad, útil para largo plazo y dolarización
+- Plazo corto → evitar cripto, preferir cobertura/CEDEARs
+- Múltiples objetivos → diversificar tipos de activo
 
 Respondé SOLO en JSON válido, sin texto extra:
 {{
-  "perfil_riesgo": "conservador" | "moderado" | "arriesgado",
-  "activos_sugeridos": ["CODIGO1", "CODIGO2"],
-  "resumen": "<texto breve en español informal>"
+  "perfil_riesgo": "moderado",
+  "activos_sugeridos": [
+    {{"codigo": "BTC", "razon": "...", "explicacion": "..."}},
+    {{"codigo": "AAPL", "razon": "...", "explicacion": "..."}}
+  ],
+  "otros_disponibles": ["ETH", "GOOGL"],
+  "resumen": "..."
 }}"""
+
+    try:
+        client = _get_client()
+        response = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=700,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = response.content[0].text.strip()
+        if "```" in raw:
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        return json.loads(raw)
+    except json.JSONDecodeError as e:
+        logger.error(f"Claude devolvió JSON inválido en sugerencia de activos: {e}")
+        return None
+    except Exception as e:
+        logger.error(f"Error llamando Claude para sugerencia de activos: {e}")
+        return None
+
+
+def responder_pregunta_activos(
+    pregunta: str,
+    objetivos: list[str],
+    plazo: str,
+    activos_disponibles: list[dict],
+    activos_seleccionados: list[str],
+) -> str | None:
+    """
+    Responde preguntas del usuario sobre activos durante el setup.
+    Retorna texto plano para Telegram (sin JSON).
+    """
+    obj_txt = " y ".join(_OBJ_DESC.get(o, o) for o in objetivos) if objetivos else "no especificado"
+    plazo_txt = _PLAZO_DESC.get(plazo, plazo or "no especificado")
+
+    activos_txt = "\n".join(
+        f"- {a['codigo']}: {a['nombre']} (tipo: {a['tipo']}, moneda: {a['moneda']})"
+        for a in activos_disponibles
+    )
+    seleccionados_txt = ", ".join(activos_seleccionados) if activos_seleccionados else "ninguno aún"
+
+    prompt = f"""Sos un asesor financiero personal en Argentina, respondiendo en un chat de Telegram.
+El usuario está eligiendo qué activos monitorear para invertir.
+
+PERFIL DEL USUARIO:
+- Objetivos: {obj_txt}
+- Plazo: {plazo_txt}
+- Activos seleccionados hasta ahora: {seleccionados_txt}
+
+ACTIVOS DISPONIBLES EN LA APP:
+{activos_txt}
+
+PREGUNTA DEL USUARIO: "{pregunta}"
+
+Respondé de forma clara, breve (máximo 4 oraciones) y en español informal argentino.
+Si pregunta por un activo específico, explicá qué es, cómo funciona y si encaja con su perfil.
+Si pregunta algo que no es sobre inversiones, redirigí amablemente al tema.
+No uses markdown complejo, solo *negrita* cuando sea necesario."""
 
     try:
         client = _get_client()
@@ -177,17 +260,9 @@ Respondé SOLO en JSON válido, sin texto extra:
             max_tokens=300,
             messages=[{"role": "user", "content": prompt}],
         )
-        text = response.content[0].text.strip()
-        if "```" in text:
-            text = text.split("```")[1]
-            if text.startswith("json"):
-                text = text[4:]
-        return json.loads(text)
-    except json.JSONDecodeError as e:
-        logger.error(f"Claude devolvió JSON inválido en sugerencia de activos: {e}")
-        return None
+        return response.content[0].text.strip()
     except Exception as e:
-        logger.error(f"Error llamando Claude para sugerencia de activos: {e}")
+        logger.error(f"Error en responder_pregunta_activos: {e}")
         return None
 
 
