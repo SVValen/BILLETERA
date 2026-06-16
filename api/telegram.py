@@ -55,6 +55,7 @@ AYUDA = (
     "  `/borrar` — elegir un movimiento reciente para borrar\n"
     "  `/borrar netflix` — filtrar por palabra y borrar\n"
     "  `/recurrentes` — ver tus gastos recurrentes activos\n"
+    "  `/inversiones` — ver recomendaciones y estado del portafolio\n"
     "  `/id` — tu Telegram ID (para vincular el dashboard)\n"
     "  `/ayuda` — esta guía"
 )
@@ -913,6 +914,42 @@ async def telegram_webhook(request: Request):
                 await _answer_callback(callback_id, token)
                 await _edit_message(chat_id, message_id, "✕ Cancelado.", token)
 
+        # Aceptar recomendación de inversión
+        elif parts[0] == "inv_ok" and len(parts) == 2:
+            rec_id = int(parts[1])
+            rec = supabase.table("recomendaciones").select("*").eq("id", rec_id).eq("usuario_id", callback_user_id).maybe_single().execute()
+            if rec.data and rec.data["estado"] == "pendiente":
+                supabase.table("recomendaciones").update({
+                    "estado": "aceptada", "decidido_at": "now()"
+                }).eq("id", rec_id).execute()
+                supabase.table("decisiones_inversion").insert({
+                    "usuario_id": callback_user_id,
+                    "recomendacion_id": rec_id,
+                    "accion": "aceptada",
+                    "precio_entrada": rec.data.get("precio_recomendacion"),
+                }).execute()
+                if token:
+                    await _answer_callback(callback_id, token)
+                    await _edit_message(chat_id, message_id,
+                        "✅ *Recomendación aceptada* — acordate de ejecutar la orden en IOL/exchange.", token)
+
+        # Rechazar recomendación de inversión
+        elif parts[0] == "inv_no" and len(parts) == 2:
+            rec_id = int(parts[1])
+            rec = supabase.table("recomendaciones").select("id, estado").eq("id", rec_id).eq("usuario_id", callback_user_id).maybe_single().execute()
+            if rec.data and rec.data["estado"] == "pendiente":
+                supabase.table("recomendaciones").update({
+                    "estado": "rechazada", "decidido_at": "now()"
+                }).eq("id", rec_id).execute()
+                supabase.table("decisiones_inversion").insert({
+                    "usuario_id": callback_user_id,
+                    "recomendacion_id": rec_id,
+                    "accion": "rechazada",
+                }).execute()
+                if token:
+                    await _answer_callback(callback_id, token)
+                    await _edit_message(chat_id, message_id, "❌ Recomendación rechazada.", token)
+
         return JSONResponse({"ok": True})
 
     # ── Mensajes ───────────────────────────────────────────────────────────────
@@ -955,6 +992,44 @@ async def telegram_webhook(request: Request):
     if text.lower().startswith(("/ayuda", "/start", "/help")):
         if token:
             await _send(chat_id, AYUDA, token)
+        return JSONResponse({"ok": True})
+
+    if text.lower().startswith("/inversiones"):
+        if token:
+            supabase = get_supabase()
+            perfil_r = supabase.table("perfiles_inversion").select("*").eq("usuario_id", user_id).maybe_single().execute()
+            if not perfil_r.data:
+                await _send(chat_id,
+                    "📈 *Módulo de Inversiones*\n\n"
+                    "Todavía no configuraste tu perfil de inversión.\n"
+                    "Entrá al dashboard → pestaña *Inversiones* para configurarlo.", token)
+            else:
+                p = perfil_r.data
+                # Mostrar recomendaciones pendientes
+                recs_r = supabase.table("recomendaciones").select(
+                    "*, activos(codigo, nombre)"
+                ).eq("usuario_id", user_id).eq("estado", "pendiente").order("generado_at", desc=True).limit(3).execute()
+
+                lines = [f"📈 *Inversiones* — perfil: {p['perfil']}\n"]
+                if recs_r.data:
+                    lines.append(f"⏳ *{len(recs_r.data)} recomendación(es) pendiente(s):*")
+                    for r in recs_r.data:
+                        a = r.get("activos") or {}
+                        emoji = "🟢" if r["accion"] == "comprar" else "🔴" if r["accion"] == "vender" else "🟡"
+                        lines.append(f"{emoji} {r['accion'].upper()} {a.get('codigo','?')} — confianza {r['confianza']}/10")
+                else:
+                    lines.append("✅ Sin recomendaciones pendientes. El sistema revisa cada 30 minutos.")
+
+                # Stats rápidas
+                stats_r = supabase.table("decisiones_inversion").select("resultado, accion").eq("usuario_id", user_id).execute()
+                decisiones = stats_r.data or []
+                aceptadas = [d for d in decisiones if d["accion"] == "aceptada"]
+                exitosas = [d for d in aceptadas if d["resultado"] == "exitoso"]
+                if aceptadas:
+                    winrate = round(len(exitosas) / len(aceptadas) * 100)
+                    lines.append(f"\n🎯 Winrate: {winrate}% ({len(exitosas)}/{len(aceptadas)} decisiones)")
+
+                await _send(chat_id, "\n".join(lines), token)
         return JSONResponse({"ok": True})
 
     if text.lower().startswith("/recurrentes"):

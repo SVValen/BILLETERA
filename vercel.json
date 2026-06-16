@@ -4,6 +4,14 @@
     {
       "path": "/api/cron",
       "schedule": "0 12 * * *"
+    },
+    {
+      "path": "/api/cron-inversiones",
+      "schedule": "*/30 * * * *"
+    },
+    {
+      "path": "/api/cron-inversiones/outcomes",
+      "schedule": "0 3 * * *"
     }
   ]
 }
