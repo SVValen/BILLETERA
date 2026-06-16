@@ -13,6 +13,19 @@ app = FastAPI()
 # Vercel strips "/api/inversiones" before passing to FastAPI, so routes use short paths.
 
 
+@app.get("/ping")
+@app.get("/api/inversiones/ping")
+async def ping():
+    """Diagnóstico sin auth: verifica que la función Python levantó correctamente."""
+    supabase = get_supabase()
+    try:
+        r = supabase.table("activos").select("id", count="exact").execute()
+        activos_count = r.count if hasattr(r, 'count') else len(r.data or [])
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)})
+    return JSONResponse({"ok": True, "activos_en_db": activos_count})
+
+
 @app.get("/perfil")
 @app.get("/api/inversiones/perfil")
 async def get_perfil(request: Request):

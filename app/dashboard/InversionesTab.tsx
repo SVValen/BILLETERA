@@ -110,16 +110,31 @@ export default function InversionesTab() {
         fetchWithAuth('/api/inversiones/recomendaciones?estado=pendiente&limit=10'),
         fetchWithAuth('/api/inversiones/decisiones'),
       ])
+
+      // Chequear errores HTTP antes de parsear JSON
+      if (!pRes.ok) {
+        const body = await pRes.text()
+        let msg = `Perfil: ${pRes.status}`
+        try { msg = JSON.parse(body).error || msg } catch { /* noop */ }
+        throw new Error(msg)
+      }
+      if (!aRes.ok || !rRes.ok || !dRes.ok) {
+        throw new Error(`API error: ${[aRes, rRes, dRes].map(r => r.status).join('/')}`)
+      }
+
       const [pData, aData, rData, dData] = await Promise.all([
         pRes.json(), aRes.json(), rRes.json(), dRes.json(),
       ])
-      setPerfil(Object.keys(pData).length ? pData : null)
+
+      // pData vacío ({}) = sin perfil configurado
+      const hasProfile = pData && !pData.error && Object.keys(pData).length > 0 && pData.perfil
+      setPerfil(hasProfile ? pData : null)
       setActivos(Array.isArray(aData) ? aData : [])
       setRecomendaciones(Array.isArray(rData) ? rData : [])
       setDecisiones(Array.isArray(dData?.decisiones) ? dData.decisiones : [])
       setStats(dData?.stats ?? null)
-    } catch {
-      setError('Error al cargar datos de inversiones')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Error al cargar datos de inversiones')
     } finally {
       setLoading(false)
     }
