@@ -61,21 +61,43 @@ async def _iol_get_token() -> str | None:
 async def fetch_iol_precio(simbolo: str) -> dict | None:
     """
     Retorna precio actual de un CEDEAR o acción argentina vía IOL.
+    Intenta endpoint individual primero (rápido), cae al batch si falla.
     {precio, moneda, variacion_pct}
     """
     token = await _iol_get_token()
     if not token:
         return None
 
+    # Intentar endpoint individual
     try:
         async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(
+                f"{IOL_BASE}/api/v2/bCBA/Titulos/{simbolo}/Cotizacion",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            if r.status_code == 200:
+                data = r.json()
+                precio = data.get("ultimoPrecio") or data.get("ultimo") or data.get("price")
+                variacion = data.get("variacionPorcentual") or data.get("variation") or 0
+                if precio:
+                    return {
+                        "precio": float(precio),
+                        "moneda": "ARS",
+                        "variacion_pct": float(variacion),
+                    }
+            logger.debug(f"IOL individual {simbolo} status={r.status_code}, intentando batch")
+    except Exception as e:
+        logger.debug(f"IOL individual {simbolo} error: {e}, intentando batch")
+
+    # Fallback: endpoint batch de CEDEARs
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
             r = await client.get(
                 f"{IOL_BASE}/api/v2/Cotizaciones/acciones/cedears/bCBA",
                 headers={"Authorization": f"Bearer {token}"},
             )
             r.raise_for_status()
             data = r.json()
-            # Buscar el símbolo en la respuesta
             titulos = data.get("titulos", [])
             for t in titulos:
                 if t.get("simbolo", "").upper() == simbolo.upper():
@@ -85,8 +107,62 @@ async def fetch_iol_precio(simbolo: str) -> dict | None:
                         "variacion_pct": float(t.get("variacionPorcentual", 0)),
                     }
     except Exception as e:
-        logger.error(f"IOL precio {simbolo}: {e}")
+        logger.error(f"IOL batch {simbolo}: {e}")
     return None
+
+
+async def fetch_iol_debug(simbolo: str = "AAPL") -> dict:
+    """
+    Diagnóstico completo de IOL: estado del token + respuesta cruda del endpoint.
+    Retorna dict con info para debugging.
+    """
+    result: dict = {"token_ok": False, "individual": None, "batch_sample": None, "error": None}
+
+    user = os.getenv("IOL_USER")
+    password = os.getenv("IOL_PASSWORD")
+    if not user or not password:
+        result["error"] = "IOL_USER / IOL_PASSWORD no configurados"
+        return result
+
+    token = await _iol_get_token()
+    if not token:
+        result["error"] = "No se pudo obtener token (verificar credenciales)"
+        return result
+
+    result["token_ok"] = True
+
+    # Probar endpoint individual
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(
+                f"{IOL_BASE}/api/v2/bCBA/Titulos/{simbolo}/Cotizacion",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            result["individual"] = {
+                "status": r.status_code,
+                "body": r.json() if r.headers.get("content-type", "").startswith("application/json") else r.text[:500],
+            }
+    except Exception as e:
+        result["individual"] = {"error": str(e)}
+
+    # Probar endpoint batch (solo primeros 3 títulos para no saturar)
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.get(
+                f"{IOL_BASE}/api/v2/Cotizaciones/acciones/cedears/bCBA",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            data = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
+            titulos = data.get("titulos", [])[:3] if isinstance(data, dict) else []
+            result["batch_sample"] = {
+                "status": r.status_code,
+                "total_titulos": len(data.get("titulos", [])) if isinstance(data, dict) else 0,
+                "primeros_3": titulos,
+            }
+    except Exception as e:
+        result["batch_sample"] = {"error": str(e)}
+
+    return result
 
 
 async def fetch_iol_historico(simbolo: str, dias: int = 60) -> list[float]:

@@ -206,6 +206,39 @@ async def cron_inversiones(request: Request):
     })
 
 
+@app.get("/api/cron_inversiones/debug_market")
+@app.get("/debug_market")
+async def debug_market(request: Request, simbolo: str = "AAPL"):
+    """
+    Endpoint de diagnóstico: testea las 3 fuentes de precios.
+    Útil para verificar que BTC/dolar/IOL respondan correctamente.
+    No requiere CRON_SECRET (solo info de mercado público).
+    """
+    from lib.market_data import fetch_binance_precio, fetch_dolar_precio, fetch_iol_debug
+
+    btc = await fetch_binance_precio("BTCUSDT")
+    eth = await fetch_binance_precio("ETHUSDT")
+
+    dolar_oficial = await fetch_dolar_precio("oficial")
+    dolar_blue = await fetch_dolar_precio("blue")
+    dolar_usdt = await fetch_dolar_precio("usdt")
+
+    iol = await fetch_iol_debug(simbolo)
+
+    return JSONResponse({
+        "binance": {
+            "BTC": btc,
+            "ETH": eth,
+        },
+        "dolarapi": {
+            "oficial": dolar_oficial,
+            "blue": dolar_blue,
+            "usdt": dolar_usdt,
+        },
+        "iol": iol,
+    })
+
+
 @app.get("/api/cron_inversiones/outcomes")
 async def actualizar_outcomes(request: Request):
     """

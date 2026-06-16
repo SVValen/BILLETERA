@@ -57,6 +57,7 @@ AYUDA = (
     "  `/recurrentes` — ver tus gastos recurrentes activos\n"
     "  `/inversiones` — ver recomendaciones y estado del portafolio\n"
     "  `/portafolio` — ver distribución de activos y P&L\n"
+    "  `/precios` — cotizaciones en tiempo real (BTC, dólar, IOL)\n"
     "  `/id` — tu Telegram ID (para vincular el dashboard)\n"
     "  `/ayuda` — esta guía"
 )
@@ -473,6 +474,73 @@ async def _handle_inversiones_cmd(user_id: str, chat_id: int, token: str) -> Non
         reply_markup={"inline_keyboard": [[
             {"text": "✏️ Cambiar perfil", "callback_data": "inv_cambiar_perfil"},
         ]]})
+
+
+async def _handle_precios_cmd(chat_id: int, token: str) -> None:
+    """Muestra precios actuales de BTC, dólar y una acción IOL de prueba."""
+    from lib.market_data import fetch_binance_precio, fetch_dolar_precio, fetch_iol_debug
+
+    await _send(chat_id, "📡 Consultando mercados...", token, parse_mode="")
+
+    lines = ["📊 *Precios de mercado*\n"]
+
+    # BTC via Binance
+    try:
+        btc = await fetch_binance_precio("BTCUSDT")
+        if btc:
+            lines.append(f"₿ *BTC* — ${btc['precio']:,.0f} USD")
+        else:
+            lines.append("₿ *BTC* — ❌ error Binance")
+    except Exception as e:
+        lines.append(f"₿ *BTC* — ❌ {e}")
+
+    # ETH via Binance
+    try:
+        eth = await fetch_binance_precio("ETHUSDT")
+        if eth:
+            lines.append(f"   *ETH* — ${eth['precio']:,.0f} USD")
+    except Exception:
+        pass
+
+    lines.append("")
+
+    # Dólar via dolarapi
+    for tipo, label in [("oficial", "Oficial"), ("blue", "Blue"), ("usdt", "USDT")]:
+        try:
+            d = await fetch_dolar_precio(tipo)
+            if d:
+                lines.append(f"💵 *{label}* — ${d['precio']:,.2f} ARS")
+            else:
+                lines.append(f"💵 *{label}* — ❌ sin datos")
+        except Exception as e:
+            lines.append(f"💵 *{label}* — ❌ {e}")
+
+    lines.append("")
+
+    # IOL debug (AAPL como prueba)
+    try:
+        iol = await fetch_iol_debug("AAPL")
+        if not iol["token_ok"]:
+            lines.append(f"🏢 *IOL* — ❌ {iol.get('error', 'sin token')}")
+        else:
+            ind = iol.get("individual", {})
+            batch = iol.get("batch_sample", {})
+            if ind.get("status") == 200 and isinstance(ind.get("body"), dict):
+                precio = ind["body"].get("ultimoPrecio") or ind["body"].get("ultimo") or "?"
+                lines.append(f"🏢 *AAPL (CEDEAR)* — ${precio} ARS ✅")
+            elif batch.get("total_titulos", 0) > 0:
+                primeros = batch.get("primeros_3", [])
+                muestra = ", ".join(t.get("simbolo", "?") for t in primeros)
+                lines.append(f"🏢 *IOL batch* — ✅ {batch['total_titulos']} titulos ({muestra}...)")
+                lines.append(f"   _endpoint individual status: {ind.get('status', '?')}_")
+            else:
+                lines.append(f"🏢 *IOL* — token ✅ pero sin datos")
+                lines.append(f"   _individual: {ind.get('status', '?')} | batch: {batch.get('status', '?')}_")
+    except Exception as e:
+        lines.append(f"🏢 *IOL* — ❌ {e}")
+
+    lines.append("\n_/iol\\_debug para ver respuesta completa de IOL_")
+    await _send(chat_id, "\n".join(lines), token)
 
 
 async def _handle_portafolio_cmd(user_id: str, chat_id: int, token: str) -> None:
@@ -1731,6 +1799,25 @@ async def telegram_webhook(request: Request):
     if text.lower().startswith("/portafolio"):
         if token:
             await _handle_portafolio_cmd(user_id, chat_id, token)
+        return JSONResponse({"ok": True})
+
+    if text.lower().startswith("/precios"):
+        if token:
+            await _handle_precios_cmd(chat_id, token)
+        return JSONResponse({"ok": True})
+
+    if text.lower().startswith("/iol_debug"):
+        if token:
+            from lib.market_data import fetch_iol_debug
+            import json as _json
+            simbolo = text.split()[-1].upper() if len(text.split()) > 1 else "AAPL"
+            await _send(chat_id, f"🔍 Consultando IOL para *{simbolo}*...", token)
+            result = await fetch_iol_debug(simbolo)
+            # Mostrar resultado de forma legible (truncar si es muy largo)
+            txt = _json.dumps(result, indent=2, ensure_ascii=False)
+            if len(txt) > 3800:
+                txt = txt[:3800] + "\n...(truncado)"
+            await _send(chat_id, f"```\n{txt}\n```", token)
         return JSONResponse({"ok": True})
 
     if text.lower().startswith("/recurrentes"):
