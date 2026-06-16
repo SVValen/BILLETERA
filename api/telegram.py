@@ -56,6 +56,7 @@ AYUDA = (
     "  `/borrar netflix` — filtrar por palabra y borrar\n"
     "  `/recurrentes` — ver tus gastos recurrentes activos\n"
     "  `/inversiones` — ver recomendaciones y estado del portafolio\n"
+    "  `/portafolio` — ver distribución de activos y P&L\n"
     "  `/id` — tu Telegram ID (para vincular el dashboard)\n"
     "  `/ayuda` — esta guía"
 )
@@ -472,6 +473,61 @@ async def _handle_inversiones_cmd(user_id: str, chat_id: int, token: str) -> Non
         reply_markup={"inline_keyboard": [[
             {"text": "✏️ Cambiar perfil", "callback_data": "inv_cambiar_perfil"},
         ]]})
+
+
+async def _handle_portafolio_cmd(user_id: str, chat_id: int, token: str) -> None:
+    import json as _json
+    supabase = get_supabase()
+
+    ua_r = supabase.table("usuario_activos").select("activo_id, porcentaje, monto_ars, precio_entrada").eq("usuario_id", user_id).execute()
+    if not ua_r.data:
+        await _send(chat_id,
+            "📊 No tenés activos configurados todavía.\nUsá /inversiones para empezar.",
+            token, parse_mode="")
+        return
+
+    activos_ids = [row["activo_id"] for row in ua_r.data]
+    activos_r = supabase.table("activos").select("id, codigo, nombre, tipo, moneda, precio_actual, precio_ars, tendencia, rsi").in_("id", activos_ids).execute()
+    activos_map = {a["id"]: a for a in (activos_r.data or [])}
+
+    ua_map = {row["activo_id"]: row for row in ua_r.data}
+
+    tipo_icon = {"crypto": "₿", "cedear": "🏢", "accion_ar": "🇦🇷", "dolar": "💵"}
+    tend_icon = {"alcista": "📈", "bajista": "📉", "lateral": "➡️"}
+
+    lines = ["📊 *Tu Portafolio*\n"]
+    for activo_id, activo in activos_map.items():
+        ua = ua_map.get(activo_id, {})
+        icon = tipo_icon.get(activo.get("tipo", ""), "")
+        precio_actual = activo.get("precio_actual") or activo.get("precio_ars")
+        precio_entrada = ua.get("precio_entrada")
+        moneda = activo.get("moneda", "")
+        tend = tend_icon.get(activo.get("tendencia", "lateral"), "➡️")
+        rsi = activo.get("rsi")
+
+        linea = f"{icon} *{activo['codigo']}* — {activo['nombre']}\n"
+        if precio_actual:
+            linea += f"   Precio: {precio_actual:,.2f} {moneda}  {tend}\n"
+        if rsi:
+            linea += f"   RSI: {rsi:.1f}\n"
+        if ua.get("porcentaje") and ua.get("monto_ars"):
+            linea += f"   Asignado: {ua['porcentaje']}% = ${ua['monto_ars']:,.0f} ARS\n"
+        if precio_entrada and precio_actual:
+            pnl = (float(precio_actual) - float(precio_entrada)) / float(precio_entrada) * 100
+            emoji_pnl = "📈" if pnl > 0 else "📉" if pnl < 0 else "➡️"
+            linea += f"   P&L desde entrada: {pnl:+.1f}% {emoji_pnl}\n"
+        lines.append(linea)
+
+    perfil_r = supabase.table("perfiles_inversion").select("capital_disponible, perfil, objetivos").eq("usuario_id", user_id).limit(1).execute()
+    if perfil_r.data:
+        p = perfil_r.data[0]
+        perfil_emoji = {"conservador": "🛡️", "moderado": "⚖️", "arriesgado": "🚀"}.get(p.get("perfil", ""), "📈")
+        lines.append(f"\n{perfil_emoji} Perfil: {p.get('perfil', '?').capitalize()}")
+        if p.get("capital_disponible"):
+            lines.append(f"💰 Capital base: ${p['capital_disponible']:,.0f} ARS")
+
+    lines.append("\n_Precios actualizados por el cron cada 30 min_")
+    await _send(chat_id, "\n".join(lines), token)
 
 
 async def _handle_presupuesto_cmd(user_id: str, chat_id: int, args: str, token: str) -> None:
@@ -1233,7 +1289,7 @@ async def telegram_webhook(request: Request):
             # Editar el mismo mensaje para actualizar los checkmarks
             await _send_activos_keyboard(callback_user_id, chat_id, token, supabase, edit_message_id=message_id)
 
-        # Confirmar selección de activos
+        # Confirmar selección de activos → portafolio si hay capital, si no activo directo
         elif parts[0] == "inv_confirmar_activos":
             seleccionados_r = supabase.table("usuario_activos").select("activo_id").eq("usuario_id", callback_user_id).execute()
             n = len(seleccionados_r.data or [])
@@ -1241,16 +1297,101 @@ async def telegram_webhook(request: Request):
                 if token:
                     await _answer_callback(callback_id, token, text="Seleccioná al menos un activo")
             else:
-                supabase.table("perfiles_inversion").update({
-                    "estado": "activo",
-                    "actualizado_at": "now()",
-                }).eq("usuario_id", callback_user_id).execute()
-                if token:
-                    await _answer_callback(callback_id, token)
-                    await _edit_message(chat_id, message_id,
-                        f"✅ *Perfil listo*\nVas a recibir señales para los {n} activo{'s' if n != 1 else ''} seleccionados.\n\n"
-                        "Usá /inversiones para ver el estado en cualquier momento.",
-                        token)
+                perfil_r2 = supabase.table("perfiles_inversion").select("capital_disponible, perfil, objetivos, plazo").eq("usuario_id", callback_user_id).limit(1).execute()
+                capital = perfil_r2.data[0].get("capital_disponible") if perfil_r2.data else None
+
+                if capital and n > 1:
+                    # Ir a configurar distribución de portafolio
+                    supabase.table("perfiles_inversion").update({
+                        "estado": "configurando_portafolio",
+                        "actualizado_at": "now()",
+                    }).eq("usuario_id", callback_user_id).execute()
+
+                    # Obtener precios actuales de los activos seleccionados
+                    activos_ids = [row["activo_id"] for row in seleccionados_r.data]
+                    activos_precios_r = supabase.table("activos").select("id, codigo, nombre, tipo, moneda, precio_actual, precio_ars").in_("id", activos_ids).execute()
+                    activos_precios = activos_precios_r.data or []
+
+                    tipo_icon = {"crypto": "₿", "cedear": "🏢", "accion_ar": "🇦🇷", "dolar": "💵"}
+                    lines = [
+                        f"✅ Activos confirmados. Ahora distribuimos los *${capital:,.0f}*\n",
+                        "📊 *Precios actuales:*",
+                    ]
+                    for a in activos_precios:
+                        precio = a.get("precio_actual") or a.get("precio_ars")
+                        moneda = a.get("moneda", "")
+                        icon = tipo_icon.get(a.get("tipo", ""), "")
+                        lines.append(f"{icon} *{a['codigo']}* — {precio:,.2f} {moneda}" if precio else f"{icon} *{a['codigo']}* — precio no disponible")
+
+                    lines += [
+                        "",
+                        "💬 *¿Cómo querés dividir el capital?*",
+                        "_Podés escribir porcentajes: `50% BTC, 50% AAPL`_",
+                        "_O pedirme que lo decida: `vos decidí`_",
+                    ]
+                    if token:
+                        await _answer_callback(callback_id, token)
+                        await _edit_message(chat_id, message_id, "\n".join(lines), token)
+                else:
+                    supabase.table("perfiles_inversion").update({
+                        "estado": "activo",
+                        "actualizado_at": "now()",
+                    }).eq("usuario_id", callback_user_id).execute()
+                    if token:
+                        await _answer_callback(callback_id, token)
+                        await _edit_message(chat_id, message_id,
+                            f"✅ *Perfil listo*\nVas a recibir señales para los {n} activo{'s' if n != 1 else ''} seleccionados.\n\n"
+                            "Usá /inversiones o /portafolio para ver el estado.",
+                            token)
+
+        # Confirmar distribución de portafolio
+        elif parts[0] == "inv_confirmar_portafolio":
+            import json as _json
+            portafolio_raw = supabase.table("perfiles_inversion").select("portafolio_pendiente").eq("usuario_id", callback_user_id).limit(1).execute()
+            distribuciones = []
+            if portafolio_raw.data and portafolio_raw.data[0].get("portafolio_pendiente"):
+                try:
+                    distribuciones = _json.loads(portafolio_raw.data[0]["portafolio_pendiente"])
+                except Exception:
+                    distribuciones = []
+
+            if distribuciones:
+                activos_r2 = supabase.table("activos").select("id, codigo, precio_actual, precio_ars").execute()
+                activos_map = {a["codigo"]: a for a in (activos_r2.data or [])}
+
+                for d in distribuciones:
+                    activo_info = activos_map.get(d["codigo"])
+                    if activo_info:
+                        precio_entrada = activo_info.get("precio_actual") or activo_info.get("precio_ars")
+                        supabase.table("usuario_activos").update({
+                            "porcentaje": d.get("porcentaje"),
+                            "monto_ars": d.get("monto_ars"),
+                            "precio_entrada": precio_entrada,
+                        }).eq("usuario_id", callback_user_id).eq("activo_id", activo_info["id"]).execute()
+
+            supabase.table("perfiles_inversion").update({
+                "estado": "activo",
+                "portafolio_pendiente": None,
+                "actualizado_at": "now()",
+            }).eq("usuario_id", callback_user_id).execute()
+
+            if token:
+                await _answer_callback(callback_id, token)
+                await _edit_message(chat_id, message_id,
+                    "✅ *Portafolio configurado*\n\nUsá /portafolio para ver tu distribución y precios actuales.",
+                    token)
+
+        elif parts[0] == "inv_cambiar_portafolio":
+            supabase.table("perfiles_inversion").update({
+                "portafolio_pendiente": None,
+                "actualizado_at": "now()",
+            }).eq("usuario_id", callback_user_id).execute()
+            if token:
+                await _answer_callback(callback_id, token)
+                await _edit_message(chat_id, message_id,
+                    "✏️ Escribí cómo querés dividir el capital.\n"
+                    "Ej: `40% BTC, 60% AAPL` o `vos decidí`.",
+                    token)
 
         return JSONResponse({"ok": True})
 
@@ -1415,9 +1556,16 @@ async def telegram_webhook(request: Request):
             return JSONResponse({"ok": True})
 
         if estado_perfil == "configurando_activos":
-            # Q&A: cualquier texto libre se responde como consulta sobre activos
             import json as _json
             from lib.claude_invest import responder_pregunta_activos
+
+            # Detectar "listo" → re-enviar keyboard
+            _listo_keywords = {"listo", "ok", "dale", "bueno", "confirmar", "continuar", "siguiente", "ya", "confirmo"}
+            if text.lower().strip() in _listo_keywords:
+                await _send(chat_id, "👍 Tocá *Confirmar selección* en el teclado para avanzar 👆", token)
+                await _send_activos_keyboard(user_id, chat_id, token, supabase_check)
+                return JSONResponse({"ok": True})
+
             perfil_data = perfil_check.data[0]
             activos_r = supabase_check.table("activos").select("id, codigo, nombre, tipo, moneda").eq("activo", True).execute()
             activos_disponibles = activos_r.data or []
@@ -1432,19 +1580,135 @@ async def telegram_webhook(request: Request):
             seleccionados_ids = {row["activo_id"] for row in (ua_r.data or [])}
             seleccionados_codigos = [a["codigo"] for a in activos_disponibles if a["id"] in seleccionados_ids]
 
+            # Cargar historial de chat
+            historial = []
+            raw_hist = perfil_data.get("historial_chat", "[]") or "[]"
+            try:
+                historial = _json.loads(raw_hist)
+            except Exception:
+                historial = []
+
             respuesta = responder_pregunta_activos(
                 pregunta=text,
                 objetivos=objetivos_lista,
                 plazo=perfil_data.get("plazo", ""),
                 activos_disponibles=activos_disponibles,
                 activos_seleccionados=seleccionados_codigos,
+                historial=historial,
             )
             if respuesta:
+                # Guardar par pregunta/respuesta en historial (max 20 entradas)
+                historial.append({"u": text, "b": respuesta})
+                if len(historial) > 20:
+                    historial = historial[-20:]
+                supabase_check.table("perfiles_inversion").update({
+                    "historial_chat": _json.dumps(historial),
+                    "actualizado_at": "now()",
+                }).eq("usuario_id", user_id).execute()
+
                 await _send(chat_id,
-                    f"{respuesta}\n\n_Cuando estés listo, confirmá con el teclado de arriba 👆_",
+                    f"{respuesta}\n\n_Escribí *listo* cuando termines de explorar 👆_",
                     token)
             else:
                 await _send(chat_id, "No pude responder eso ahora. Probá más tarde.", token, parse_mode="")
+            return JSONResponse({"ok": True})
+
+        if estado_perfil == "configurando_portafolio":
+            import json as _json
+            from lib.claude_invest import sugerir_portafolio
+
+            perfil_data = perfil_check.data[0]
+            capital = perfil_data.get("capital_disponible")
+            if not capital:
+                supabase_check.table("perfiles_inversion").update({"estado": "activo"}).eq("usuario_id", user_id).execute()
+                await _send(chat_id, "✅ Perfil listo. Usá /portafolio para ver tus activos.", token)
+                return JSONResponse({"ok": True})
+
+            # Cargar activos seleccionados con precios
+            ua_r = supabase_check.table("usuario_activos").select("activo_id").eq("usuario_id", user_id).execute()
+            activos_ids = [row["activo_id"] for row in (ua_r.data or [])]
+            activos_r = supabase_check.table("activos").select("id, codigo, nombre, tipo, moneda, precio_actual, precio_ars").in_("id", activos_ids).execute()
+            activos_con_precios = activos_r.data or []
+
+            _obj_raw = perfil_data.get("objetivos") or perfil_data.get("objetivo") or "[]"
+            try:
+                objetivos_lista = _json.loads(_obj_raw) if _obj_raw.startswith("[") else [_obj_raw] if _obj_raw else []
+            except Exception:
+                objetivos_lista = []
+
+            historial = []
+            raw_hist = perfil_data.get("historial_chat", "[]") or "[]"
+            try:
+                historial = _json.loads(raw_hist)
+            except Exception:
+                historial = []
+
+            # Detectar si pide sugerencia o pasa distribución propia
+            _pide_sugerencia = any(w in text.lower() for w in ("vos", "decidí", "sugerí", "no sé", "no se", "elegí", "decide", "sugiere"))
+
+            if _pide_sugerencia:
+                await _send(chat_id, "🤖 Calculando distribución óptima...", token, parse_mode="")
+                distribuciones = sugerir_portafolio(
+                    objetivos=objetivos_lista,
+                    perfil_riesgo=perfil_data.get("perfil", "moderado"),
+                    plazo=perfil_data.get("plazo", ""),
+                    capital_ars=float(capital),
+                    activos_con_precios=activos_con_precios,
+                    historial=historial,
+                )
+            else:
+                # Pasar texto a Claude para que lo parsee como distribución
+                await _send(chat_id, "🤖 Interpretando tu distribución...", token, parse_mode="")
+                _parse_prompt = (
+                    f"El usuario escribió: \"{text}\"\n"
+                    f"Activos disponibles: {[a['codigo'] for a in activos_con_precios]}\n"
+                    f"Capital total: ${capital:,.0f} ARS\n\n"
+                    "Interpretá la distribución y respondé SOLO en JSON:\n"
+                    "[{\"codigo\": \"BTC\", \"porcentaje\": 50, \"monto_ars\": 250000, \"razon\": \"como pidió el usuario\"}]"
+                )
+                try:
+                    from lib.claude_invest import _get_client, _parse_json
+                    _resp = _get_client().messages.create(
+                        model="claude-haiku-4-5-20251001",
+                        max_tokens=300,
+                        messages=[{"role": "user", "content": _parse_prompt}],
+                    )
+                    distribuciones = _parse_json(_resp.content[0].text)
+                    if not isinstance(distribuciones, list):
+                        distribuciones = None
+                except Exception:
+                    distribuciones = None
+
+            if not distribuciones:
+                await _send(chat_id,
+                    "No pude interpretar la distribución. "
+                    "Probá con el formato: `40% BTC, 60% AAPL` o escribí `vos decidí`.",
+                    token)
+                return JSONResponse({"ok": True})
+
+            # Guardar como pendiente y mostrar para confirmación
+            supabase_check.table("perfiles_inversion").update({
+                "portafolio_pendiente": _json.dumps(distribuciones),
+                "actualizado_at": "now()",
+            }).eq("usuario_id", user_id).execute()
+
+            tipo_icon = {"crypto": "₿", "cedear": "🏢", "accion_ar": "🇦🇷", "dolar": "💵"}
+            activos_map = {a["codigo"]: a for a in activos_con_precios}
+            lines = ["📊 *Distribución sugerida:*\n"]
+            for d in distribuciones:
+                a_info = activos_map.get(d.get("codigo", ""), {})
+                icon = tipo_icon.get(a_info.get("tipo", ""), "")
+                lines.append(
+                    f"{icon} *{d['codigo']}*: {d.get('porcentaje', '?')}% = ${d.get('monto_ars', 0):,.0f}\n"
+                    f"   _{d.get('razon', '')}_"
+                )
+            lines.append("\n¿Confirmás esta distribución?")
+
+            await _send(chat_id, "\n".join(lines), token,
+                reply_markup={"inline_keyboard": [[
+                    {"text": "✅ Confirmar", "callback_data": "inv_confirmar_portafolio"},
+                    {"text": "✏️ Cambiar", "callback_data": "inv_cambiar_portafolio"},
+                ]]})
             return JSONResponse({"ok": True})
 
     if text.startswith("/id"):
@@ -1462,6 +1726,11 @@ async def telegram_webhook(request: Request):
     if text.lower().startswith("/inversiones"):
         if token:
             await _handle_inversiones_cmd(user_id, chat_id, token)
+        return JSONResponse({"ok": True})
+
+    if text.lower().startswith("/portafolio"):
+        if token:
+            await _handle_portafolio_cmd(user_id, chat_id, token)
         return JSONResponse({"ok": True})
 
     if text.lower().startswith("/recurrentes"):

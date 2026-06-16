@@ -32,6 +32,17 @@ def _get_client() -> Anthropic:
     return _client
 
 
+def _parse_json(text: str) -> dict | None:
+    if "```" in text:
+        text = text.split("```")[1]
+        if text.startswith("json"):
+            text = text[4:]
+    try:
+        return json.loads(text.strip())
+    except json.JSONDecodeError:
+        return None
+
+
 def generar_recomendacion(
     perfil: dict,
     activo: dict,
@@ -42,18 +53,6 @@ def generar_recomendacion(
     interpretacion_rsi: str,
     winrate: float | None = None,
 ) -> dict | None:
-    """
-    Llama a Claude para generar una recomendación de compra/venta/mantener.
-
-    Retorna:
-    {
-      "accion": "comprar" | "vender" | "mantener",
-      "razon": str,
-      "confianza": int (1-10),
-      "porcentaje_capital": int,
-      "riesgos": list[str]
-    }
-    """
     precio = activo.get("precio_actual") or activo.get("precio_ars")
     moneda = activo.get("moneda", "USD")
 
@@ -65,16 +64,14 @@ def generar_recomendacion(
 
     winrate_txt = f"{winrate:.0f}%" if winrate is not None else "sin historial aún"
 
-    # Objetivos guardados como JSON array o string legacy
-    objetivos_raw = perfil.get("objetivos") or perfil.get("objetivo") or ""
-    if objetivos_raw and objetivos_raw.startswith("["):
+    _obj_raw = perfil.get("objetivos") or perfil.get("objetivo") or ""
+    if _obj_raw and _obj_raw.startswith("["):
         try:
-            obj_list = json.loads(objetivos_raw)
-            objetivos_txt = " y ".join(_OBJ_DESC.get(o, o) for o in obj_list)
+            objetivos_txt = " y ".join(_OBJ_DESC.get(o, o) for o in json.loads(_obj_raw))
         except Exception:
-            objetivos_txt = objetivos_raw
+            objetivos_txt = _obj_raw
     else:
-        objetivos_txt = _OBJ_DESC.get(objetivos_raw, objetivos_raw) or "no especificado"
+        objetivos_txt = _OBJ_DESC.get(_obj_raw, _obj_raw) or "no especificado"
 
     prompt = f"""Sos un asistente financiero personal en Argentina. Analizá este activo y generá una recomendación concreta.
 
@@ -93,37 +90,26 @@ ACTIVO:
 - EMA 50: {ema_50 if ema_50 else "no disponible"}
 - Tendencia: {tendencia}
 
-CONTEXTO:
-- Activo argentino/regional — considerá el contexto macro de Argentina (inflación, tipo de cambio, cepo)
-- No tenemos noticias en tiempo real, basate solo en los indicadores
+CONTEXTO: Argentina — inflación, tipo de cambio, cepo. Sin noticias en tiempo real.
 
-Generá una recomendación ESPECÍFICA. Respondé SOLO en JSON válido, sin texto extra:
+Respondé SOLO en JSON válido, sin texto extra:
 {{
   "accion": "comprar" | "vender" | "mantener",
-  "razon": "<explicación de 2-3 oraciones en español argentino>",
-  "confianza": <número del 1 al 10>,
-  "porcentaje_capital": <porcentaje del capital disponible a invertir, entre 5 y 30>,
+  "razon": "<2-3 oraciones en español argentino>",
+  "confianza": <1-10>,
+  "porcentaje_capital": <5-30>,
   "riesgos": ["<riesgo 1>", "<riesgo 2>"]
 }}"""
 
     try:
-        client = _get_client()
-        response = client.messages.create(
+        response = _get_client().messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=400,
             messages=[{"role": "user", "content": prompt}],
         )
-        text = response.content[0].text.strip()
-        if "```" in text:
-            text = text.split("```")[1]
-            if text.startswith("json"):
-                text = text[4:]
-        return json.loads(text)
-    except json.JSONDecodeError as e:
-        logger.error(f"Claude devolvió JSON inválido: {e}")
-        return None
+        return _parse_json(response.content[0].text)
     except Exception as e:
-        logger.error(f"Error llamando Claude: {e}")
+        logger.error(f"Error en generar_recomendacion: {e}")
         return None
 
 
@@ -135,17 +121,12 @@ def sugerir_activos_para_perfil(
     activos_disponibles: list[dict],
 ) -> dict | None:
     """
-    Analiza el perfil del usuario y sugiere qué activos monitorear + perfil de riesgo.
-
     Retorna:
     {
       "perfil_riesgo": "conservador" | "moderado" | "arriesgado",
-      "activos_sugeridos": [
-        {"codigo": "BTC", "razon": "...", "explicacion": "..."},
-        ...
-      ],
+      "activos_sugeridos": [{"codigo": "BTC", "razon": "...", "explicacion": "..."}, ...],
       "otros_disponibles": ["ETH", "GOOGL"],
-      "resumen": "texto breve para el usuario"
+      "resumen": "texto breve"
     }
     """
     obj_txt = " y ".join(_OBJ_DESC.get(o, o) for o in objetivos) if objetivos else "no especificado"
@@ -159,59 +140,45 @@ def sugerir_activos_para_perfil(
 
     prompt = f"""Sos un asesor financiero personal en Argentina. Un usuario está configurando su perfil de inversión.
 
-PERFIL DEL USUARIO:
+PERFIL:
 - Objetivos: {obj_txt}
 - Plazo: {plazo_txt}
-- Capital disponible: {capital_txt}
-- En sus propias palabras: "{descripcion or 'no especificó'}"
+- Capital: {capital_txt}
+- En sus palabras: "{descripcion or 'no especificó'}"
 
 ACTIVOS DISPONIBLES:
 {activos_txt}
 
-Tu tarea:
-1. Derivar el perfil de riesgo (conservador/moderado/arriesgado).
-2. Seleccionar 2-4 activos principales. Para cada uno escribí:
-   - "razon": por qué encaja con sus objetivos (1 línea, informal)
-   - "explicacion": qué es y cómo funciona en el contexto argentino (2-3 oraciones simples, sin jerga)
-3. Listar otros activos disponibles no seleccionados que podrían interesarle (máx 3).
+Tarea:
+1. Derivá el perfil de riesgo (conservador/moderado/arriesgado).
+2. Seleccioná 2-4 activos principales. Para cada uno:
+   - "razon": por qué encaja (1 línea, informal)
+   - "explicacion": qué es y cómo funciona en Argentina (2-3 oraciones simples)
+3. Listá otros activos no seleccionados que podrían interesar (máx 3).
 4. Resumen general (1-2 oraciones, español informal).
 
-Reglas para Argentina:
-- CEDEARs = acciones extranjeras que cotizan en pesos, buena cobertura cambiaria
-- Acciones AR = exposición local, más volátiles
-- BTC/ETH = cripto, alta volatilidad, útil para largo plazo y dolarización
-- Plazo corto → evitar cripto, preferir cobertura/CEDEARs
-- Múltiples objetivos → diversificar tipos de activo
+Reglas: CEDEARs = cobertura cambiaria. Crypto = volatilidad alta. Plazo corto → evitar crypto.
+Múltiples objetivos → diversificar.
 
-Respondé SOLO en JSON válido, sin texto extra:
+Respondé SOLO en JSON válido:
 {{
   "perfil_riesgo": "moderado",
   "activos_sugeridos": [
-    {{"codigo": "BTC", "razon": "...", "explicacion": "..."}},
-    {{"codigo": "AAPL", "razon": "...", "explicacion": "..."}}
+    {{"codigo": "BTC", "razon": "...", "explicacion": "..."}}
   ],
-  "otros_disponibles": ["ETH", "GOOGL"],
+  "otros_disponibles": ["ETH"],
   "resumen": "..."
 }}"""
 
     try:
-        client = _get_client()
-        response = client.messages.create(
+        response = _get_client().messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=700,
             messages=[{"role": "user", "content": prompt}],
         )
-        raw = response.content[0].text.strip()
-        if "```" in raw:
-            raw = raw.split("```")[1]
-            if raw.startswith("json"):
-                raw = raw[4:]
-        return json.loads(raw)
-    except json.JSONDecodeError as e:
-        logger.error(f"Claude devolvió JSON inválido en sugerencia de activos: {e}")
-        return None
+        return _parse_json(response.content[0].text)
     except Exception as e:
-        logger.error(f"Error llamando Claude para sugerencia de activos: {e}")
+        logger.error(f"Error en sugerir_activos_para_perfil: {e}")
         return None
 
 
@@ -221,10 +188,11 @@ def responder_pregunta_activos(
     plazo: str,
     activos_disponibles: list[dict],
     activos_seleccionados: list[str],
+    historial: list[dict] | None = None,
 ) -> str | None:
     """
     Responde preguntas del usuario sobre activos durante el setup.
-    Retorna texto plano para Telegram (sin JSON).
+    historial: lista de {"u": pregunta, "b": respuesta} (últimas N interacciones)
     """
     obj_txt = " y ".join(_OBJ_DESC.get(o, o) for o in objetivos) if objetivos else "no especificado"
     plazo_txt = _PLAZO_DESC.get(plazo, plazo or "no especificado")
@@ -233,29 +201,34 @@ def responder_pregunta_activos(
         f"- {a['codigo']}: {a['nombre']} (tipo: {a['tipo']}, moneda: {a['moneda']})"
         for a in activos_disponibles
     )
-    seleccionados_txt = ", ".join(activos_seleccionados) if activos_seleccionados else "ninguno aún"
+    seleccionados_txt = ", ".join(activos_seleccionados) if activos_seleccionados else "ninguno"
 
-    prompt = f"""Sos un asesor financiero personal en Argentina, respondiendo en un chat de Telegram.
-El usuario está eligiendo qué activos monitorear para invertir.
+    hist_txt = ""
+    if historial:
+        lines = []
+        for h in historial[-6:]:
+            lines.append(f"Usuario: {h.get('u', '')}")
+            lines.append(f"Asesor: {h.get('b', '')}")
+        hist_txt = "\nCONVERSACIÓN PREVIA:\n" + "\n".join(lines) + "\n"
 
-PERFIL DEL USUARIO:
-- Objetivos: {obj_txt}
-- Plazo: {plazo_txt}
-- Activos seleccionados hasta ahora: {seleccionados_txt}
+    prompt = f"""Sos un asesor financiero personal en Argentina, respondiendo en Telegram.
+El usuario está eligiendo activos para monitorear.
 
-ACTIVOS DISPONIBLES EN LA APP:
+PERFIL: objetivos={obj_txt}, plazo={plazo_txt}
+Activos seleccionados: {seleccionados_txt}
+
+ACTIVOS DISPONIBLES:
 {activos_txt}
+{hist_txt}
+PREGUNTA ACTUAL: "{pregunta}"
 
-PREGUNTA DEL USUARIO: "{pregunta}"
-
-Respondé de forma clara, breve (máximo 4 oraciones) y en español informal argentino.
-Si pregunta por un activo específico, explicá qué es, cómo funciona y si encaja con su perfil.
-Si pregunta algo que no es sobre inversiones, redirigí amablemente al tema.
-No uses markdown complejo, solo *negrita* cuando sea necesario."""
+Respondé claro, breve (máx 4 oraciones), español informal argentino.
+Si pregunta por un activo: explicá qué es, cómo funciona, si encaja con su perfil.
+Si dice que quiere confirmar/listo/ok: indicale que use el teclado de arriba.
+Solo *negrita* cuando sea necesario."""
 
     try:
-        client = _get_client()
-        response = client.messages.create(
+        response = _get_client().messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=300,
             messages=[{"role": "user", "content": prompt}],
@@ -266,11 +239,76 @@ No uses markdown complejo, solo *negrita* cuando sea necesario."""
         return None
 
 
-def formatear_mensaje_telegram(activo: dict, rec: dict, recomendacion_id: int) -> tuple[str, list]:
+def sugerir_portafolio(
+    objetivos: list[str],
+    perfil_riesgo: str,
+    plazo: str,
+    capital_ars: float,
+    activos_con_precios: list[dict],
+    historial: list[dict] | None = None,
+) -> list[dict] | None:
     """
-    Arma el texto y los botones inline para enviar por Telegram.
-    Retorna (texto, reply_markup)
+    Sugiere cómo distribuir el capital entre los activos seleccionados.
+
+    activos_con_precios: [{codigo, nombre, tipo, moneda, precio_actual, precio_ars}, ...]
+
+    Retorna: [{"codigo": "BTC", "porcentaje": 40, "monto_ars": 200000, "razon": "..."}, ...]
     """
+    obj_txt = " y ".join(_OBJ_DESC.get(o, o) for o in objetivos) if objetivos else "no especificado"
+    plazo_txt = _PLAZO_DESC.get(plazo, plazo or "no especificado")
+
+    activos_txt = "\n".join(
+        f"- {a['codigo']}: {a['nombre']} | precio: {a.get('precio_actual') or a.get('precio_ars')} {a['moneda']}"
+        for a in activos_con_precios
+    )
+
+    hist_txt = ""
+    if historial:
+        comentarios = [h.get("u", "") for h in historial[-4:] if h.get("u")]
+        if comentarios:
+            hist_txt = f"\nComentarios del usuario durante el setup: {' | '.join(comentarios)}\n"
+
+    prompt = f"""Sos un asesor financiero en Argentina. Sugerí cómo distribuir el capital entre estos activos.
+
+PERFIL:
+- Objetivos: {obj_txt}
+- Perfil de riesgo: {perfil_riesgo}
+- Plazo: {plazo_txt}
+- Capital total: ${capital_ars:,.0f} ARS
+{hist_txt}
+ACTIVOS A DISTRIBUIR:
+{activos_txt}
+
+Consideraciones:
+- Los porcentajes deben sumar 100
+- Adaptá la distribución al perfil de riesgo y objetivos
+- Para activos en USD, el monto_ars es el equivalente al tipo de cambio actual (aproximado)
+
+Respondé SOLO en JSON válido:
+[
+  {{"codigo": "BTC", "porcentaje": 40, "monto_ars": 200000, "razon": "mayor exposición crypto por perfil arriesgado"}},
+  {{"codigo": "AAPL", "porcentaje": 60, "monto_ars": 300000, "razon": "base estable en CEDEAR"}}
+]"""
+
+    try:
+        response = _get_client().messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=400,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = response.content[0].text.strip()
+        if "```" in raw:
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        result = json.loads(raw.strip())
+        return result if isinstance(result, list) else None
+    except Exception as e:
+        logger.error(f"Error en sugerir_portafolio: {e}")
+        return None
+
+
+def formatear_mensaje_telegram(activo: dict, rec: dict, recomendacion_id: int) -> tuple[str, dict]:
     emoji_accion = {"comprar": "🟢", "vender": "🔴", "mantener": "🟡"}.get(rec["accion"], "⚪")
     emoji_conf = "🔥" if rec["confianza"] >= 8 else "✅" if rec["confianza"] >= 6 else "⚠️"
 
