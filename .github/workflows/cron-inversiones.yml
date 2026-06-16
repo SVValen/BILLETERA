@@ -3,7 +3,7 @@ name: Cron Inversiones
 on:
   schedule:
     - cron: '*/30 * * * *'
-  workflow_dispatch: # permite dispararlo manualmente desde GitHub
+  workflow_dispatch:
 
 jobs:
   trigger:
@@ -11,6 +11,13 @@ jobs:
     steps:
       - name: Actualizar precios y generar recomendaciones
         run: |
-          curl -sf -X GET \
+          HTTP_CODE=$(curl -s -o /tmp/response.txt -w "%{http_code}" \
+            -X GET \
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
-            https://billetera-gamma.vercel.app/api/cron-inversiones
+            https://billetera-gamma.vercel.app/api/cron-inversiones)
+          echo "HTTP Status: $HTTP_CODE"
+          cat /tmp/response.txt
+          if [ "$HTTP_CODE" -ge 400 ]; then
+            echo "Error: endpoint returned $HTTP_CODE"
+            exit 1
+          fi
