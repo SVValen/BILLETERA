@@ -1,6 +1,7 @@
 """
 Fetchers de precios de mercado.
-Fuentes: Binance (crypto), IOL (CEDEARs/acciones AR), dolarapi (dólar/USDT).
+Fuentes: CoinGecko (crypto), IOL (CEDEARs/acciones AR), dolarapi (dólar).
+Nota: Binance bloquea IPs de Vercel (HTTP 451), se usa CoinGecko en su lugar.
 """
 import os
 import logging
@@ -9,9 +10,18 @@ from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
-IOL_BASE = "https://api.invertironline.com"
-BINANCE_BASE = "https://api.binance.com/api/v3"
-DOLAR_BASE = "https://dolarapi.com/v1"
+IOL_BASE       = "https://api.invertironline.com"
+COINGECKO_BASE = "https://api.coingecko.com/api/v3"
+DOLAR_BASE     = "https://dolarapi.com/v1"
+
+# Mapeo símbolo Binance → id CoinGecko
+COINGECKO_IDS: dict[str, str] = {
+    "BTCUSDT": "bitcoin",
+    "ETHUSDT":  "ethereum",
+}
+
+# Endpoints válidos de dolarapi (usdt no existe, se usa cripto)
+DOLAR_TIPOS_VALIDOS = {"oficial", "blue", "bolsa", "contadoconliqui", "tarjeta", "mayorista", "cripto"}
 
 # ============================================================
 # IOL — autenticación con caché de token
@@ -80,14 +90,10 @@ async def fetch_iol_precio(simbolo: str) -> dict | None:
                 precio = data.get("ultimoPrecio") or data.get("ultimo") or data.get("price")
                 variacion = data.get("variacionPorcentual") or data.get("variation") or 0
                 if precio:
-                    return {
-                        "precio": float(precio),
-                        "moneda": "ARS",
-                        "variacion_pct": float(variacion),
-                    }
+                    return {"precio": float(precio), "moneda": "ARS", "variacion_pct": float(variacion)}
             logger.debug(f"IOL individual {simbolo} status={r.status_code}, intentando batch")
     except Exception as e:
-        logger.debug(f"IOL individual {simbolo} error: {e}, intentando batch")
+        logger.debug(f"IOL individual {simbolo}: {e}, intentando batch")
 
     # Fallback: endpoint batch de CEDEARs
     try:
@@ -98,8 +104,7 @@ async def fetch_iol_precio(simbolo: str) -> dict | None:
             )
             r.raise_for_status()
             data = r.json()
-            titulos = data.get("titulos", [])
-            for t in titulos:
+            for t in data.get("titulos", []):
                 if t.get("simbolo", "").upper() == simbolo.upper():
                     return {
                         "precio": float(t.get("ultimoPrecio", 0)),
@@ -111,64 +116,7 @@ async def fetch_iol_precio(simbolo: str) -> dict | None:
     return None
 
 
-async def fetch_iol_debug(simbolo: str = "AAPL") -> dict:
-    """
-    Diagnóstico completo de IOL: estado del token + respuesta cruda del endpoint.
-    Retorna dict con info para debugging.
-    """
-    result: dict = {"token_ok": False, "individual": None, "batch_sample": None, "error": None}
-
-    user = os.getenv("IOL_USER")
-    password = os.getenv("IOL_PASSWORD")
-    if not user or not password:
-        result["error"] = "IOL_USER / IOL_PASSWORD no configurados"
-        return result
-
-    token = await _iol_get_token()
-    if not token:
-        result["error"] = "No se pudo obtener token (verificar credenciales)"
-        return result
-
-    result["token_ok"] = True
-
-    # Probar endpoint individual
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            r = await client.get(
-                f"{IOL_BASE}/api/v2/bCBA/Titulos/{simbolo}/Cotizacion",
-                headers={"Authorization": f"Bearer {token}"},
-            )
-            result["individual"] = {
-                "status": r.status_code,
-                "body": r.json() if r.headers.get("content-type", "").startswith("application/json") else r.text[:500],
-            }
-    except Exception as e:
-        result["individual"] = {"error": str(e)}
-
-    # Probar endpoint batch (solo primeros 3 títulos para no saturar)
-    try:
-        async with httpx.AsyncClient(timeout=15) as client:
-            r = await client.get(
-                f"{IOL_BASE}/api/v2/Cotizaciones/acciones/cedears/bCBA",
-                headers={"Authorization": f"Bearer {token}"},
-            )
-            data = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
-            titulos = data.get("titulos", [])[:3] if isinstance(data, dict) else []
-            result["batch_sample"] = {
-                "status": r.status_code,
-                "total_titulos": len(data.get("titulos", [])) if isinstance(data, dict) else 0,
-                "primeros_3": titulos,
-            }
-    except Exception as e:
-        result["batch_sample"] = {"error": str(e)}
-
-    return result
-
-
 async def fetch_iol_historico(simbolo: str, dias: int = 60) -> list[float]:
-    """
-    Retorna lista de precios de cierre históricos para calcular RSI/EMA.
-    """
     token = await _iol_get_token()
     if not token:
         return []
@@ -185,7 +133,6 @@ async def fetch_iol_historico(simbolo: str, dias: int = 60) -> list[float]:
             )
             r.raise_for_status()
             data = r.json()
-            # Ordenar por fecha ASC y extraer cierres
             items = sorted(data, key=lambda x: x.get("fechaHora", ""))
             return [float(item["ultimoPrecio"]) for item in items if item.get("ultimoPrecio")]
     except Exception as e:
@@ -193,63 +140,139 @@ async def fetch_iol_historico(simbolo: str, dias: int = 60) -> list[float]:
     return []
 
 
-# ============================================================
-# Binance — crypto
-# ============================================================
+async def fetch_iol_debug(simbolo: str = "AAPL") -> dict:
+    """Diagnóstico completo de IOL: estado del token + respuesta cruda."""
+    result: dict = {"token_ok": False, "individual": None, "batch_sample": None, "error": None}
 
-async def fetch_binance_precio(simbolo: str) -> dict | None:
-    """
-    Retorna precio actual de un par en Binance.
-    simbolo: 'BTCUSDT', 'ETHUSDT'
-    {precio, moneda}
-    """
+    user = os.getenv("IOL_USER")
+    password = os.getenv("IOL_PASSWORD")
+    if not user or not password:
+        result["error"] = "IOL_USER / IOL_PASSWORD no configurados en variables de entorno"
+        return result
+
+    token = await _iol_get_token()
+    if not token:
+        result["error"] = "No se pudo obtener token — verificar credenciales IOL"
+        return result
+
+    result["token_ok"] = True
+
     try:
         async with httpx.AsyncClient(timeout=10) as client:
-            r = await client.get(f"{BINANCE_BASE}/ticker/price", params={"symbol": simbolo})
-            r.raise_for_status()
-            data = r.json()
-            return {"precio": float(data["price"]), "moneda": "USD"}
+            r = await client.get(
+                f"{IOL_BASE}/api/v2/bCBA/Titulos/{simbolo}/Cotizacion",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            ct = r.headers.get("content-type", "")
+            result["individual"] = {
+                "status": r.status_code,
+                "body": r.json() if "json" in ct else r.text[:500],
+            }
     except Exception as e:
-        logger.error(f"Binance precio {simbolo}: {e}")
-    return None
+        result["individual"] = {"error": str(e)}
 
-
-async def fetch_binance_historico(simbolo: str, interval: str = "1h", limit: int = 60) -> list[float]:
-    """
-    Retorna lista de precios de cierre de velas para calcular RSI/EMA.
-    """
     try:
         async with httpx.AsyncClient(timeout=15) as client:
             r = await client.get(
-                f"{BINANCE_BASE}/klines",
-                params={"symbol": simbolo, "interval": interval, "limit": limit},
+                f"{IOL_BASE}/api/v2/Cotizaciones/acciones/cedears/bCBA",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            ct = r.headers.get("content-type", "")
+            data = r.json() if "json" in ct else {}
+            titulos = data.get("titulos", [])[:3] if isinstance(data, dict) else []
+            result["batch_sample"] = {
+                "status": r.status_code,
+                "total_titulos": len(data.get("titulos", [])) if isinstance(data, dict) else 0,
+                "primeros_3": titulos,
+            }
+    except Exception as e:
+        result["batch_sample"] = {"error": str(e)}
+
+    return result
+
+
+# ============================================================
+# CoinGecko — crypto (reemplaza Binance, sin bloqueos geo)
+# ============================================================
+
+async def fetch_coingecko_precio(simbolo: str) -> dict | None:
+    """
+    Retorna precio actual de crypto vía CoinGecko.
+    simbolo: 'BTCUSDT', 'ETHUSDT' (mismo formato que Binance para compatibilidad)
+    {precio, moneda}
+    """
+    coin_id = COINGECKO_IDS.get(simbolo.upper())
+    if not coin_id:
+        logger.warning(f"CoinGecko: símbolo {simbolo} no mapeado")
+        return None
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(
+                f"{COINGECKO_BASE}/simple/price",
+                params={"ids": coin_id, "vs_currencies": "usd"},
+                headers={"Accept": "application/json"},
             )
             r.raise_for_status()
-            # klines[i][4] = close price
-            return [float(k[4]) for k in r.json()]
+            data = r.json()
+            precio = data.get(coin_id, {}).get("usd")
+            if precio:
+                return {"precio": float(precio), "moneda": "USD"}
     except Exception as e:
-        logger.error(f"Binance historico {simbolo}: {e}")
+        logger.error(f"CoinGecko precio {simbolo}: {e}")
+    return None
+
+
+async def fetch_coingecko_historico(simbolo: str, limit: int = 60) -> list[float]:
+    """
+    Retorna lista de precios de cierre horarios para calcular RSI/EMA.
+    CoinGecko devuelve hasta 90 días de datos horarios.
+    """
+    coin_id = COINGECKO_IDS.get(simbolo.upper())
+    if not coin_id:
+        return []
+
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.get(
+                f"{COINGECKO_BASE}/coins/{coin_id}/market_chart",
+                params={"vs_currency": "usd", "days": 3, "interval": "hourly"},
+                headers={"Accept": "application/json"},
+            )
+            r.raise_for_status()
+            prices = r.json().get("prices", [])
+            # [[timestamp_ms, price], ...] → tomar últimos `limit`
+            return [float(p[1]) for p in prices[-limit:]]
+    except Exception as e:
+        logger.error(f"CoinGecko historico {simbolo}: {e}")
     return []
 
 
 # ============================================================
-# dolarapi — dólar / USDT
+# dolarapi — dólar
 # ============================================================
 
-async def fetch_dolar_precio(tipo: str = "usdt") -> dict | None:
+async def fetch_dolar_precio(tipo: str = "oficial") -> dict | None:
     """
-    Retorna precio del dólar/USDT en ARS.
-    tipo: 'oficial', 'blue', 'usdt', 'cripto'
-    {precio, moneda}
+    Retorna precio del dólar en ARS.
+    tipos válidos: oficial, blue, bolsa, contadoconliqui, tarjeta, mayorista, cripto
+    Nota: 'usdt' no existe en dolarapi — usar 'cripto'
     """
+    # Normalizar alias comunes
+    if tipo == "usdt":
+        tipo = "cripto"
+
+    if tipo not in DOLAR_TIPOS_VALIDOS:
+        logger.warning(f"dolarapi: tipo '{tipo}' no válido, usando 'oficial'")
+        tipo = "oficial"
+
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             r = await client.get(f"{DOLAR_BASE}/dolares/{tipo}")
             r.raise_for_status()
             data = r.json()
-            # Usar precio de venta (lo que pagás para comprar dólares)
             precio = data.get("venta") or data.get("compra")
-            return {"precio": float(precio), "moneda": "ARS"}
+            return {"precio": float(precio), "moneda": "ARS"} if precio else None
     except Exception as e:
         logger.error(f"dolarapi {tipo}: {e}")
     return None
@@ -260,15 +283,12 @@ async def fetch_dolar_precio(tipo: str = "usdt") -> dict | None:
 # ============================================================
 
 async def fetch_precio_activo(activo: dict) -> dict | None:
-    """
-    Dado un registro de la tabla `activos`, fetchea el precio actual.
-    Retorna {precio, precio_ars, moneda} o None si falla.
-    """
     fuente = activo["fuente"]
     simbolo = activo["simbolo_fuente"]
 
     if fuente == "binance":
-        return await fetch_binance_precio(simbolo)
+        # binance → usar CoinGecko (Binance bloquea Vercel)
+        return await fetch_coingecko_precio(simbolo)
 
     if fuente == "iol":
         return await fetch_iol_precio(simbolo)
@@ -281,17 +301,13 @@ async def fetch_precio_activo(activo: dict) -> dict | None:
 
 
 async def fetch_historico_activo(activo: dict, limite: int = 60) -> list[float]:
-    """
-    Dado un registro de la tabla `activos`, retorna historial de cierres.
-    """
     fuente = activo["fuente"]
     simbolo = activo["simbolo_fuente"]
 
     if fuente == "binance":
-        return await fetch_binance_historico(simbolo, limit=limite)
+        return await fetch_coingecko_historico(simbolo, limit=limite)
 
     if fuente == "iol":
         return await fetch_iol_historico(simbolo, dias=limite)
 
-    # dolarapi no tiene histórico útil para indicadores
     return []

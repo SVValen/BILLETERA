@@ -478,25 +478,25 @@ async def _handle_inversiones_cmd(user_id: str, chat_id: int, token: str) -> Non
 
 async def _handle_precios_cmd(chat_id: int, token: str) -> None:
     """Muestra precios actuales de BTC, dólar y una acción IOL de prueba."""
-    from lib.market_data import fetch_binance_precio, fetch_dolar_precio, fetch_iol_debug
+    from lib.market_data import fetch_coingecko_precio, fetch_dolar_precio, fetch_iol_debug
 
     await _send(chat_id, "📡 Consultando mercados...", token, parse_mode="")
 
     lines = ["📊 *Precios de mercado*\n"]
 
-    # BTC via Binance
+    # BTC via CoinGecko (Binance bloquea Vercel con 451)
     try:
-        btc = await fetch_binance_precio("BTCUSDT")
+        btc = await fetch_coingecko_precio("BTCUSDT")
         if btc:
             lines.append(f"₿ *BTC* — ${btc['precio']:,.0f} USD")
         else:
-            lines.append("₿ *BTC* — ❌ error Binance")
+            lines.append("₿ *BTC* — ❌ sin datos")
     except Exception as e:
         lines.append(f"₿ *BTC* — ❌ {e}")
 
-    # ETH via Binance
+    # ETH via CoinGecko
     try:
-        eth = await fetch_binance_precio("ETHUSDT")
+        eth = await fetch_coingecko_precio("ETHUSDT")
         if eth:
             lines.append(f"   *ETH* — ${eth['precio']:,.0f} USD")
     except Exception:
@@ -505,7 +505,7 @@ async def _handle_precios_cmd(chat_id: int, token: str) -> None:
     lines.append("")
 
     # Dólar via dolarapi
-    for tipo, label in [("oficial", "Oficial"), ("blue", "Blue"), ("usdt", "USDT")]:
+    for tipo, label in [("oficial", "Oficial"), ("blue", "Blue"), ("cripto", "Cripto")]:
         try:
             d = await fetch_dolar_precio(tipo)
             if d:

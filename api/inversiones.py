@@ -10,11 +10,10 @@ from lib.auth import get_telegram_id_from_request
 
 app = FastAPI()
 
+# Vercel strips "/api/inversiones" before passing to FastAPI, so routes use short paths.
 
-# ============================================================
-# Perfil de inversión
-# ============================================================
 
+@app.get("/perfil")
 @app.get("/api/inversiones/perfil")
 async def get_perfil(request: Request):
     telegram_id, err = await get_telegram_id_from_request(request)
@@ -26,6 +25,7 @@ async def get_perfil(request: Request):
     return JSONResponse(r.data[0] if r.data else {})
 
 
+@app.post("/perfil")
 @app.post("/api/inversiones/perfil")
 async def upsert_perfil(request: Request):
     telegram_id, err = await get_telegram_id_from_request(request)
@@ -51,10 +51,7 @@ async def upsert_perfil(request: Request):
     return JSONResponse({"ok": True})
 
 
-# ============================================================
-# Activos disponibles
-# ============================================================
-
+@app.get("/activos")
 @app.get("/api/inversiones/activos")
 async def get_activos(request: Request):
     telegram_id, err = await get_telegram_id_from_request(request)
@@ -66,10 +63,7 @@ async def get_activos(request: Request):
     return JSONResponse(r.data or [])
 
 
-# ============================================================
-# Recomendaciones
-# ============================================================
-
+@app.get("/recomendaciones")
 @app.get("/api/inversiones/recomendaciones")
 async def get_recomendaciones(request: Request):
     telegram_id, err = await get_telegram_id_from_request(request)
@@ -94,10 +88,7 @@ async def get_recomendaciones(request: Request):
     return JSONResponse(r.data or [])
 
 
-# ============================================================
-# Decisiones (historial + winrate)
-# ============================================================
-
+@app.get("/decisiones")
 @app.get("/api/inversiones/decisiones")
 async def get_decisiones(request: Request):
     telegram_id, err = await get_telegram_id_from_request(request)
@@ -115,8 +106,6 @@ async def get_decisiones(request: Request):
     )
 
     decisiones = r.data or []
-
-    # Calcular winrate
     aceptadas = [d for d in decisiones if d["accion"] == "aceptada"]
     exitosas = [d for d in aceptadas if d["resultado"] == "exitoso"]
     winrate = round(len(exitosas) / len(aceptadas) * 100, 1) if aceptadas else None
@@ -132,10 +121,7 @@ async def get_decisiones(request: Request):
     })
 
 
-# ============================================================
-# Registrar decisión manual (desde dashboard)
-# ============================================================
-
+@app.post("/decidir")
 @app.post("/api/inversiones/decidir")
 async def decidir(request: Request):
     telegram_id, err = await get_telegram_id_from_request(request)
@@ -151,7 +137,6 @@ async def decidir(request: Request):
 
     supabase = get_supabase()
 
-    # Verificar que la recomendación pertenece al usuario
     rec_r = (
         supabase.table("recomendaciones")
         .select("id, estado, precio_recomendacion, activo_id")
@@ -166,20 +151,17 @@ async def decidir(request: Request):
     if rec["estado"] != "pendiente":
         return JSONResponse({"error": "Recomendación ya decidida"}, status_code=400)
 
-    # Actualizar estado de la recomendación
     supabase.table("recomendaciones").update({
         "estado": accion,
         "decidido_at": "now()",
     }).eq("id", rec_id).execute()
 
-    # Registrar decisión
-    decision_data = {
+    supabase.table("decisiones_inversion").insert({
         "usuario_id": telegram_id,
         "recomendacion_id": rec_id,
         "accion": accion,
         "monto": body.get("monto"),
         "precio_entrada": rec["precio_recomendacion"],
-    }
-    supabase.table("decisiones_inversion").insert(decision_data).execute()
+    }).execute()
 
     return JSONResponse({"ok": True})
