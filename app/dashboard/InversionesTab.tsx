@@ -105,10 +105,10 @@ export default function InversionesTab() {
     setError(null)
     try {
       const [pRes, aRes, rRes, dRes] = await Promise.all([
-        fetchWithAuth('/api/inversiones/perfil'),
-        fetchWithAuth('/api/inversiones/activos'),
-        fetchWithAuth('/api/inversiones/recomendaciones?estado=pendiente&limit=10'),
-        fetchWithAuth('/api/inversiones/decisiones'),
+        fetchWithAuth('/api/inversiones?resource=perfil'),
+        fetchWithAuth('/api/inversiones?resource=activos'),
+        fetchWithAuth('/api/inversiones?resource=recomendaciones&estado=pendiente&limit=10'),
+        fetchWithAuth('/api/inversiones?resource=decisiones'),
       ])
 
       // Chequear errores HTTP antes de parsear JSON
@@ -144,10 +144,11 @@ export default function InversionesTab() {
 
   async function guardarPerfil() {
     setSavingPerfil(true)
-    await fetchWithAuth('/api/inversiones/perfil', {
+    await fetchWithAuth('/api/inversiones', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        resource: 'perfil',
         perfil: formPerfil.perfil,
         objetivo: formPerfil.objetivo || null,
         capital_disponible: formPerfil.capital ? parseFloat(formPerfil.capital) : null,
@@ -160,10 +161,10 @@ export default function InversionesTab() {
 
   async function decidir(recId: number, accion: 'aceptada' | 'rechazada') {
     setDecidiendo(recId)
-    await fetchWithAuth('/api/inversiones/decidir', {
+    await fetchWithAuth('/api/inversiones', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ recomendacion_id: recId, accion }),
+      body: JSON.stringify({ resource: 'decidir', recomendacion_id: recId, accion }),
     })
     setDecidiendo(null)
     fetchData()
