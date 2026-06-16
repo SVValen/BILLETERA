@@ -370,20 +370,37 @@ async def _handle_inversiones_cmd(user_id: str, chat_id: int, token: str) -> Non
     if not p:
         await _send(chat_id,
             "📈 *Módulo de Inversiones*\n\n"
-            "Elegí tu perfil de riesgo para empezar:",
+            "Antes de empezar, contame: *¿cuál es tu objetivo principal?*",
             token,
             reply_markup={
-                "inline_keyboard": [[
-                    {"text": "🛡️ Conservador", "callback_data": "inv_perfil:conservador"},
-                    {"text": "⚖️ Moderado",    "callback_data": "inv_perfil:moderado"},
-                    {"text": "🚀 Arriesgado",  "callback_data": "inv_perfil:arriesgado"},
-                ]]
+                "inline_keyboard": [
+                    [{"text": "💰 Generar ingresos pasivos", "callback_data": "inv_objetivo:ingresos_pasivos"}],
+                    [{"text": "📈 Hacer crecer mi capital",  "callback_data": "inv_objetivo:crecimiento"}],
+                    [{"text": "🛡️ Cubrirme de la inflación", "callback_data": "inv_objetivo:cobertura"}],
+                    [{"text": "🎯 Ahorrar para una meta",    "callback_data": "inv_objetivo:meta_especifica"}],
+                ]
             })
         return
 
     # Perfil existente → mostrar resumen
-    perfil_emoji = {"conservador": "🛡️", "moderado": "⚖️", "arriesgado": "🚀"}.get(p["perfil"], "📈")
-    lines = [f"📈 *Inversiones* — {perfil_emoji} {p['perfil'].capitalize()}"]
+    obj_labels = {
+        "ingresos_pasivos": "💰 Ingresos pasivos",
+        "crecimiento": "📈 Crecer capital",
+        "cobertura": "🛡️ Cobertura inflación",
+        "meta_especifica": "🎯 Meta específica",
+    }
+    plazo_labels = {"corto": "< 1 año", "mediano": "1-3 años", "largo": "+3 años"}
+    perfil_emoji = {"conservador": "🛡️", "moderado": "⚖️", "arriesgado": "🚀"}.get(p.get("perfil", ""), "📈")
+    obj_txt = obj_labels.get(p.get("objetivo", ""), "")
+    plazo_txt = plazo_labels.get(p.get("plazo", ""), "")
+    header = f"📈 *Inversiones*"
+    if obj_txt:
+        header += f" — {obj_txt}"
+    lines = [header]
+    if plazo_txt:
+        lines.append(f"⏱ Plazo: {plazo_txt}")
+    if p.get("perfil"):
+        lines.append(f"🎚 Riesgo derivado: {perfil_emoji} {p['perfil'].capitalize()}")
     if p.get("capital_disponible"):
         lines.append(f"💰 Capital: ${p['capital_disponible']:,.0f}")
 
@@ -1022,37 +1039,66 @@ async def telegram_webhook(request: Request):
                 await _answer_callback(callback_id, token)
                 await _edit_message(chat_id, message_id, "✕ Cancelado.", token)
 
-        # Elegir / cambiar perfil de inversión
-        elif parts[0] == "inv_perfil" and len(parts) == 2:
-            tipo = parts[1]
-            if tipo in ("conservador", "moderado", "arriesgado"):
+        # Elegir objetivo de inversión (primer paso del setup)
+        elif parts[0] == "inv_objetivo" and len(parts) == 2:
+            objetivo = parts[1]
+            if objetivo in ("ingresos_pasivos", "crecimiento", "cobertura", "meta_especifica"):
                 supabase.table("perfiles_inversion").upsert({
                     "usuario_id": callback_user_id,
-                    "perfil": tipo,
-                    "estado": "configurando_capital",
+                    "objetivo": objetivo,
+                    "perfil": "moderado",  # default, se sobreescribe al final
+                    "estado": "configurando_plazo",
                     "actualizado_at": "now()",
                 }, on_conflict="usuario_id").execute()
-                perfil_emoji = {"conservador": "🛡️", "moderado": "⚖️", "arriesgado": "🚀"}[tipo]
+                obj_label = {
+                    "ingresos_pasivos": "💰 Ingresos pasivos",
+                    "crecimiento": "📈 Crecer capital",
+                    "cobertura": "🛡️ Cobertura inflación",
+                    "meta_especifica": "🎯 Meta específica",
+                }[objetivo]
                 if token:
                     await _answer_callback(callback_id, token)
                     await _edit_message(chat_id, message_id,
-                        f"✅ Perfil *{perfil_emoji} {tipo}* guardado.\n\n"
-                        "💰 ¿Cuánto capital tenés disponible para invertir? (en ARS)\n"
-                        "_Respondé con un número, ej: 500000_\n"
-                        "_O escribí /skip para omitir_", token)
+                        f"✅ Objetivo: *{obj_label}*\n\n"
+                        "⏱ *¿A qué plazo pensás invertir?*",
+                        token,
+                        reply_markup={"inline_keyboard": [
+                            [{"text": "⚡ Corto plazo (< 1 año)",   "callback_data": "inv_plazo:corto"}],
+                            [{"text": "📅 Mediano plazo (1-3 años)", "callback_data": "inv_plazo:mediano"}],
+                            [{"text": "🔭 Largo plazo (+ 3 años)",  "callback_data": "inv_plazo:largo"}],
+                        ]})
+
+        # Elegir plazo (segundo paso)
+        elif parts[0] == "inv_plazo" and len(parts) == 2:
+            plazo = parts[1]
+            if plazo in ("corto", "mediano", "largo"):
+                supabase.table("perfiles_inversion").update({
+                    "plazo": plazo,
+                    "estado": "configurando_capital",
+                    "actualizado_at": "now()",
+                }).eq("usuario_id", callback_user_id).execute()
+                plazo_label = {"corto": "< 1 año", "mediano": "1-3 años", "largo": "+ 3 años"}[plazo]
+                if token:
+                    await _answer_callback(callback_id, token)
+                    await _edit_message(chat_id, message_id,
+                        f"✅ Plazo: *{plazo_label}*\n\n"
+                        "💰 *¿Cuánto capital tenés disponible para invertir?* (en ARS)\n"
+                        "_Respondé con un número, ej: `500000`_\n"
+                        "_O escribí `skip` para omitirlo_",
+                        token)
 
         elif parts[0] == "inv_cambiar_perfil":
             if token:
                 await _answer_callback(callback_id, token)
                 await _edit_message(chat_id, message_id,
-                    "📈 Elegí tu nuevo perfil de riesgo:", token,
-                    reply_markup={
-                        "inline_keyboard": [[
-                            {"text": "🛡️ Conservador", "callback_data": "inv_perfil:conservador"},
-                            {"text": "⚖️ Moderado",    "callback_data": "inv_perfil:moderado"},
-                            {"text": "🚀 Arriesgado",  "callback_data": "inv_perfil:arriesgado"},
-                        ]]
-                    })
+                    "📈 *Reconfigurar perfil — ¿Cuál es tu objetivo?*",
+                    token,
+                    reply_markup={"inline_keyboard": [
+                        [{"text": "💰 Generar ingresos pasivos", "callback_data": "inv_objetivo:ingresos_pasivos"}],
+                        [{"text": "📈 Hacer crecer mi capital",  "callback_data": "inv_objetivo:crecimiento"}],
+                        [{"text": "🛡️ Cubrirme de la inflación", "callback_data": "inv_objetivo:cobertura"}],
+                        [{"text": "🎯 Ahorrar para una meta",    "callback_data": "inv_objetivo:meta_especifica"}],
+                    ]})
 
         # Aceptar recomendación de inversión
         elif parts[0] == "inv_ok" and len(parts) == 2:
@@ -1150,17 +1196,23 @@ async def telegram_webhook(request: Request):
             await _send(chat_id, "No pude entender el audio 🙁", token, parse_mode="")
             return JSONResponse({"ok": True})
         await _send(chat_id, f'🗣 _"{transcribed}"_', token)
-        await _process_text(transcribed, user_id, chat_id, token)
-        return JSONResponse({"ok": True})
+        # Si el usuario está en paso de descripción libre, el audio actúa como texto
+        _perfil_estado_r = get_supabase().table("perfiles_inversion").select("estado").eq("usuario_id", user_id).limit(1).execute()
+        _estado_inv = _perfil_estado_r.data[0].get("estado") if _perfil_estado_r.data else None
+        if _estado_inv in ("configurando_capital", "configurando_descripcion"):
+            text = transcribed
+        else:
+            await _process_text(transcribed, user_id, chat_id, token)
+            return JSONResponse({"ok": True})
 
-    text = message.get("text", "").strip()
+    text = message.get("text", "").strip() if "text" in message else (text if "voice" in message or "audio" in message else "")
     if not text:
         return JSONResponse({"ok": True})
 
-    # ── Capital de inversión (respuesta al setup de perfil) ───────────────────
+    # ── Setup de perfil de inversión (respuestas de texto a pasos del wizard) ──
     if token and not text.startswith("/"):
         supabase_check = get_supabase()
-        perfil_check = supabase_check.table("perfiles_inversion").select("estado").eq("usuario_id", user_id).limit(1).execute()
+        perfil_check = supabase_check.table("perfiles_inversion").select("*").eq("usuario_id", user_id).limit(1).execute()
         estado_perfil = perfil_check.data[0].get("estado") if perfil_check.data else None
 
         if estado_perfil == "configurando_capital":
@@ -1175,12 +1227,77 @@ async def telegram_webhook(request: Request):
                         "No entendí el monto. Enviá solo el número (ej: `500000`) o escribí `skip` para omitirlo.", token)
                     return JSONResponse({"ok": True})
 
-            upd: dict = {"estado": "configurando_activos", "actualizado_at": "now()"}
+            upd: dict = {"estado": "configurando_descripcion", "actualizado_at": "now()"}
             if capital is not None:
                 upd["capital_disponible"] = capital
             supabase_check.table("perfiles_inversion").update(upd).eq("usuario_id", user_id).execute()
 
-            # Pasar al paso de selección de activos
+            await _send(chat_id,
+                "📝 *Casi listo.*\n\n"
+                "Contame en tus propias palabras qué buscás con tus inversiones. "
+                "Por ejemplo: qué te preocupa, si querés cubrirte del dólar, si ya tenés algo invertido, etc.\n\n"
+                "_También podés mandar un audio. Escribí `skip` para saltearlo._",
+                token)
+            return JSONResponse({"ok": True})
+
+        if estado_perfil == "configurando_descripcion":
+            from lib.claude_invest import sugerir_activos_para_perfil
+            descripcion = text if text.lower() not in ("skip", "/skip") else ""
+
+            # Guardar descripción
+            supabase_check.table("perfiles_inversion").update({
+                "descripcion_libre": descripcion or None,
+                "actualizado_at": "now()",
+            }).eq("usuario_id", user_id).execute()
+
+            await _send(chat_id, "🤖 Analizando tu perfil...", token, parse_mode="")
+
+            perfil_data = perfil_check.data[0]
+            activos_r = supabase_check.table("activos").select("id, codigo, nombre, tipo, moneda").eq("activo", True).execute()
+            activos_disponibles = activos_r.data or []
+
+            sugerencia = sugerir_activos_para_perfil(
+                objetivo=perfil_data.get("objetivo", ""),
+                plazo=perfil_data.get("plazo", ""),
+                capital=perfil_data.get("capital_disponible"),
+                descripcion=descripcion,
+                activos_disponibles=activos_disponibles,
+            )
+
+            if sugerencia:
+                # Guardar perfil de riesgo derivado por Claude
+                supabase_check.table("perfiles_inversion").update({
+                    "perfil": sugerencia.get("perfil_riesgo", "moderado"),
+                    "estado": "configurando_activos",
+                    "actualizado_at": "now()",
+                }).eq("usuario_id", user_id).execute()
+
+                # Pre-seleccionar los activos sugeridos
+                codigos_sugeridos = {c.upper() for c in sugerencia.get("activos_sugeridos", [])}
+                activos_a_pre_seleccionar = [a for a in activos_disponibles if a["codigo"] in codigos_sugeridos]
+                for activo in activos_a_pre_seleccionar:
+                    try:
+                        supabase_check.table("usuario_activos").insert({
+                            "usuario_id": user_id, "activo_id": activo["id"]
+                        }).execute()
+                    except Exception:
+                        pass  # UNIQUE constraint — ya estaba seleccionado
+
+                perfil_emoji = {"conservador": "🛡️", "moderado": "⚖️", "arriesgado": "🚀"}.get(
+                    sugerencia.get("perfil_riesgo", ""), "📈")
+                await _send(chat_id,
+                    f"{perfil_emoji} *Perfil sugerido: {sugerencia.get('perfil_riesgo', '').capitalize()}*\n\n"
+                    f"_{sugerencia.get('resumen', '')}_\n\n"
+                    "Te marqué los activos que te recomiendo. "
+                    "Podés ajustar la selección antes de confirmar 👇",
+                    token)
+            else:
+                supabase_check.table("perfiles_inversion").update({
+                    "estado": "configurando_activos",
+                    "actualizado_at": "now()",
+                }).eq("usuario_id", user_id).execute()
+                await _send(chat_id, "No pude analizar el perfil ahora, pero podés elegir los activos manualmente:", token, parse_mode="")
+
             await _send_activos_keyboard(user_id, chat_id, token, supabase_check)
             return JSONResponse({"ok": True})
 

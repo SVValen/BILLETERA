@@ -7,11 +7,13 @@
 CREATE TABLE IF NOT EXISTS perfiles_inversion (
   id SERIAL PRIMARY KEY,
   usuario_id TEXT NOT NULL UNIQUE,  -- telegram_id (mismo que en movimientos)
-  perfil VARCHAR(20) NOT NULL DEFAULT 'moderado',  -- conservador, moderado, arriesgado
-  objetivo VARCHAR(50),  -- pasivos, ahorro_corto, largo_plazo, preservacion
+  perfil VARCHAR(20) NOT NULL DEFAULT 'moderado',  -- conservador, moderado, arriesgado (derivado por Claude)
+  objetivo VARCHAR(50),                 -- ingresos_pasivos, crecimiento, cobertura, meta_especifica
+  plazo VARCHAR(20),                    -- corto, mediano, largo
   capital_disponible DECIMAL(15,2),
+  descripcion_libre TEXT,               -- texto libre del usuario (input para Claude)
   notas TEXT,
-  estado VARCHAR(30) DEFAULT 'activo',  -- activo | configurando_capital
+  estado VARCHAR(30) DEFAULT 'activo',  -- activo | configurando_plazo | configurando_capital | configurando_descripcion | configurando_activos
   creado_at TIMESTAMPTZ DEFAULT NOW(),
   actualizado_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -75,6 +77,19 @@ CREATE TABLE IF NOT EXISTS decisiones_inversion (
 );
 
 CREATE INDEX IF NOT EXISTS idx_dec_usuario ON decisiones_inversion (usuario_id);
+
+-- Activos que cada usuario eligió monitorear
+CREATE TABLE IF NOT EXISTS usuario_activos (
+  id SERIAL PRIMARY KEY,
+  usuario_id TEXT NOT NULL,
+  activo_id INT NOT NULL REFERENCES activos(id),
+  UNIQUE(usuario_id, activo_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ua_usuario ON usuario_activos (usuario_id);
+
+ALTER TABLE usuario_activos ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "service_role_all" ON usuario_activos FOR ALL USING (true) WITH CHECK (true);
 
 -- Historial de precios (para calcular RSI sin llamar la API N veces)
 CREATE TABLE IF NOT EXISTS precios_historicos (

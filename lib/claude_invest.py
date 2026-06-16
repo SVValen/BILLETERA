@@ -104,6 +104,93 @@ Generá una recomendación ESPECÍFICA. Respondé SOLO en JSON válido, sin text
         return None
 
 
+def sugerir_activos_para_perfil(
+    objetivo: str,
+    plazo: str,
+    capital: float | None,
+    descripcion: str,
+    activos_disponibles: list[dict],
+) -> dict | None:
+    """
+    Analiza el perfil del usuario y sugiere qué activos monitorear + perfil de riesgo.
+
+    Retorna:
+    {
+      "perfil_riesgo": "conservador" | "moderado" | "arriesgado",
+      "activos_sugeridos": ["BTC", "AAPL", ...],
+      "resumen": "texto breve para el usuario (1-2 oraciones)"
+    }
+    """
+    obj_desc = {
+        "ingresos_pasivos": "generar ingresos pasivos regulares",
+        "crecimiento": "hacer crecer el capital a largo plazo",
+        "cobertura": "protegerse de la inflación / preservar el valor en dólares",
+        "meta_especifica": "ahorrar para una meta específica",
+    }.get(objetivo, objetivo)
+
+    plazo_desc = {
+        "corto": "menos de 1 año",
+        "mediano": "entre 1 y 3 años",
+        "largo": "más de 3 años",
+    }.get(plazo, plazo)
+
+    capital_txt = f"${capital:,.0f} ARS" if capital else "no especificado"
+
+    activos_txt = "\n".join(
+        f"- {a['codigo']}: {a['nombre']} (tipo: {a['tipo']}, moneda: {a['moneda']})"
+        for a in activos_disponibles
+    )
+
+    prompt = f"""Sos un asesor financiero personal en Argentina. Un usuario está configurando su perfil de inversión.
+
+PERFIL DEL USUARIO:
+- Objetivo: {obj_desc}
+- Plazo: {plazo_desc}
+- Capital disponible: {capital_txt}
+- En sus propias palabras: "{descripcion}"
+
+ACTIVOS DISPONIBLES PARA MONITOREAR:
+{activos_txt}
+
+Tu tarea:
+1. Derivar el perfil de riesgo más apropiado (conservador/moderado/arriesgado) basado en sus objetivos y plazo.
+2. Seleccionar los activos más adecuados para su perfil (entre 2 y 5 activos).
+3. Escribir un resumen breve (máx 2 oraciones) explicando la lógica al usuario, en español informal.
+
+Consideraciones para Argentina:
+- CEDEARs y acciones AR son buenas para cobertura en ARS/USD
+- Crypto (BTC/ETH) para crecimiento con alta volatilidad
+- Para plazos cortos, evitar crypto y preferir cobertura
+- Para plazos largos, crypto + cedears es razonable
+
+Respondé SOLO en JSON válido, sin texto extra:
+{{
+  "perfil_riesgo": "conservador" | "moderado" | "arriesgado",
+  "activos_sugeridos": ["CODIGO1", "CODIGO2"],
+  "resumen": "<texto breve en español informal>"
+}}"""
+
+    try:
+        client = _get_client()
+        response = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=300,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        text = response.content[0].text.strip()
+        if "```" in text:
+            text = text.split("```")[1]
+            if text.startswith("json"):
+                text = text[4:]
+        return json.loads(text)
+    except json.JSONDecodeError as e:
+        logger.error(f"Claude devolvió JSON inválido en sugerencia de activos: {e}")
+        return None
+    except Exception as e:
+        logger.error(f"Error llamando Claude para sugerencia de activos: {e}")
+        return None
+
+
 def formatear_mensaje_telegram(activo: dict, rec: dict, recomendacion_id: int) -> tuple[str, list]:
     """
     Arma el texto y los botones inline para enviar por Telegram.
