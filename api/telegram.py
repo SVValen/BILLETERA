@@ -476,22 +476,20 @@ async def _handle_inversiones_cmd(user_id: str, chat_id: int, token: str) -> Non
         ]]})
 
 
-async def _handle_precios_cmd(chat_id: int, token: str) -> None:
-    """Muestra precios actuales de BTC, dólar y una acción IOL de prueba."""
-    from lib.market_data import fetch_coingecko_precio, fetch_dolar_precio, fetch_iol_debug
+async def _handle_precios_cmd(user_id: str, chat_id: int, token: str) -> None:
+    """Muestra precios de mercado + activos del portafolio del usuario."""
+    from lib.market_data import fetch_coingecko_precio, fetch_dolar_precio, fetch_iol_precio
 
     await _send(chat_id, "📡 Consultando mercados...", token, parse_mode="")
 
     lines = ["📊 *Precios de mercado*\n"]
 
-    # BTC via CoinGecko
+    # BTC / ETH via CoinGecko
     try:
         btc = await fetch_coingecko_precio("BTCUSDT")
         lines.append(f"₿ *BTC* — ${btc['precio']:,.0f} USD" if btc else "₿ *BTC* — sin datos")
     except Exception:
         lines.append("₿ *BTC* — error")
-
-    # ETH via CoinGecko
     try:
         eth = await fetch_coingecko_precio("ETHUSDT")
         if eth:
@@ -509,25 +507,38 @@ async def _handle_precios_cmd(chat_id: int, token: str) -> None:
         except Exception:
             lines.append(f"💵 {label} — error")
 
-    lines.append("")
+    # Activos del portafolio del usuario
+    supabase = get_supabase()
+    ua_r = supabase.table("usuario_activos").select("activo_id").eq("usuario_id", user_id).execute()
+    activos_ids = [row["activo_id"] for row in (ua_r.data or [])]
 
-    # IOL (AAPL como prueba de conexión)
-    try:
-        iol = await fetch_iol_debug("AAPL")
-        if not iol["token_ok"]:
-            lines.append("🏢 *IOL* — sin token (verificar IOL\\_USER / IOL\\_PASSWORD)")
-        else:
-            ind = iol.get("individual", {})
-            if ind.get("status") == 200 and isinstance(ind.get("body"), dict):
-                body = ind["body"]
-                precio = body.get("ultimoPrecio") or body.get("ultimo") or body.get("price") or "?"
-                lines.append(f"🏢 *AAPL (CEDEAR)* — ${precio} ARS ✅")
-            else:
-                lines.append(f"🏢 *IOL* — token OK, AAPL status {ind.get('status', '?')}")
-    except Exception:
-        lines.append("🏢 *IOL* — error al consultar")
+    if activos_ids:
+        activos_r = supabase.table("activos").select("id, codigo, nombre, tipo, fuente, simbolo_fuente, moneda").in_("id", activos_ids).execute()
+        activos = activos_r.data or []
 
-    lines.append("\nUsá /iol\\_debug para ver respuesta completa de IOL")
+        tipo_icon = {"crypto": "₿", "cedear": "🏢", "accion_ar": "🇦🇷", "dolar": "💵"}
+
+        lines.append("")
+        lines.append("*Tus activos:*")
+        for activo in activos:
+            icon = tipo_icon.get(activo.get("tipo", ""), "📈")
+            codigo = activo["codigo"]
+            nombre = activo.get("nombre", codigo)
+            moneda = activo.get("moneda", "ARS")
+            try:
+                from lib.market_data import fetch_precio_activo
+                precio_data = await fetch_precio_activo(activo)
+                if precio_data:
+                    precio = precio_data["precio"]
+                    mon = precio_data.get("moneda", moneda)
+                    lines.append(f"{icon} *{codigo}* — ${precio:,.2f} {mon}")
+                else:
+                    lines.append(f"{icon} *{codigo}* — sin datos")
+            except Exception:
+                lines.append(f"{icon} *{codigo}* — error")
+    else:
+        lines.append("\n_No tenés activos en tu portafolio. Usá /inversiones para configurar._")
+
     await _send(chat_id, "\n".join(lines), token)
 
 
@@ -1805,7 +1816,7 @@ async def telegram_webhook(request: Request):
 
     if text.lower().startswith("/precios"):
         if token:
-            await _handle_precios_cmd(chat_id, token)
+            await _handle_precios_cmd(user_id, chat_id, token)
         return JSONResponse({"ok": True})
 
     if text.lower().startswith("/iol_debug"):
