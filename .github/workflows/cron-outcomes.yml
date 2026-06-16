@@ -11,6 +11,13 @@ jobs:
     steps:
       - name: Actualizar resultados de decisiones
         run: |
-          curl -sf -X GET \
+          HTTP_CODE=$(curl -s -o /tmp/response.txt -w "%{http_code}" \
+            -X GET \
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
-            https://billetera-gamma.vercel.app/api/cron-inversiones/outcomes
+            https://billetera-gamma.vercel.app/api/cron_inversiones/outcomes)
+          echo "HTTP Status: $HTTP_CODE"
+          cat /tmp/response.txt
+          if [ "$HTTP_CODE" -ge 400 ]; then
+            echo "Error: endpoint returned $HTTP_CODE"
+            exit 1
+          fi

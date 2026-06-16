@@ -109,7 +109,7 @@ async def _ya_tiene_recomendacion_pendiente(usuario_id: str, activo_id: int, sup
     return bool(r.data)
 
 
-@app.get("/api/cron-inversiones")
+@app.get("/api/cron_inversiones")
 async def cron_inversiones(request: Request):
     # Validar CRON_SECRET
     cron_secret = os.getenv("CRON_SECRET", "")
@@ -198,7 +198,7 @@ async def cron_inversiones(request: Request):
     })
 
 
-@app.get("/api/cron-inversiones/outcomes")
+@app.get("/api/cron_inversiones/outcomes")
 async def actualizar_outcomes(request: Request):
     """
     Job diario: actualiza el resultado de decisiones aceptadas
