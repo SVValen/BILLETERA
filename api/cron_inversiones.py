@@ -110,6 +110,7 @@ async def _ya_tiene_recomendacion_pendiente(usuario_id: str, activo_id: int, sup
 
 
 @app.get("/api/cron_inversiones")
+@app.get("/")
 async def cron_inversiones(request: Request):
     # Validar CRON_SECRET
     cron_secret = os.getenv("CRON_SECRET", "")
