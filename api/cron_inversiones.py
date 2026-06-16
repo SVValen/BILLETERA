@@ -222,11 +222,11 @@ async def actualizar_outcomes(request: Request):
     actualizados = 0
     for dec in (r.data or []):
         activo_id = dec["recomendaciones"]["activo_id"]
-        activo_r = supabase.table("activos").select("precio_actual, precio_ars").eq("id", activo_id).maybe_single().execute()
+        activo_r = supabase.table("activos").select("precio_actual, precio_ars").eq("id", activo_id).limit(1).execute()
         if not activo_r.data:
             continue
 
-        precio_actual = activo_r.data.get("precio_actual") or activo_r.data.get("precio_ars")
+        precio_actual = activo_r.data[0].get("precio_actual") or activo_r.data[0].get("precio_ars")
         precio_entrada = dec.get("precio_entrada")
 
         if not precio_actual or not precio_entrada:

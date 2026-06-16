@@ -22,8 +22,8 @@ async def get_perfil(request: Request):
         return err
 
     supabase = get_supabase()
-    r = supabase.table("perfiles_inversion").select("*").eq("usuario_id", telegram_id).maybe_single().execute()
-    return JSONResponse(r.data or {})
+    r = supabase.table("perfiles_inversion").select("*").eq("usuario_id", telegram_id).limit(1).execute()
+    return JSONResponse(r.data[0] if r.data else {})
 
 
 @app.post("/api/inversiones/perfil")
@@ -152,17 +152,18 @@ async def decidir(request: Request):
     supabase = get_supabase()
 
     # Verificar que la recomendación pertenece al usuario
-    rec = (
+    rec_r = (
         supabase.table("recomendaciones")
         .select("id, estado, precio_recomendacion, activo_id")
         .eq("id", rec_id)
         .eq("usuario_id", telegram_id)
-        .maybe_single()
+        .limit(1)
         .execute()
     )
-    if not rec.data:
+    if not rec_r.data:
         return JSONResponse({"error": "Recomendación no encontrada"}, status_code=404)
-    if rec.data["estado"] != "pendiente":
+    rec = rec_r.data[0]
+    if rec["estado"] != "pendiente":
         return JSONResponse({"error": "Recomendación ya decidida"}, status_code=400)
 
     # Actualizar estado de la recomendación
@@ -177,7 +178,7 @@ async def decidir(request: Request):
         "recomendacion_id": rec_id,
         "accion": accion,
         "monto": body.get("monto"),
-        "precio_entrada": rec.data["precio_recomendacion"],
+        "precio_entrada": rec["precio_recomendacion"],
     }
     supabase.table("decisiones_inversion").insert(decision_data).execute()
 

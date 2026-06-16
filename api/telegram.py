@@ -917,8 +917,9 @@ async def telegram_webhook(request: Request):
         # Aceptar recomendación de inversión
         elif parts[0] == "inv_ok" and len(parts) == 2:
             rec_id = int(parts[1])
-            rec = supabase.table("recomendaciones").select("*").eq("id", rec_id).eq("usuario_id", callback_user_id).maybe_single().execute()
-            if rec.data and rec.data["estado"] == "pendiente":
+            rec_r = supabase.table("recomendaciones").select("*").eq("id", rec_id).eq("usuario_id", callback_user_id).limit(1).execute()
+            rec = rec_r.data[0] if rec_r.data else None
+            if rec and rec["estado"] == "pendiente":
                 supabase.table("recomendaciones").update({
                     "estado": "aceptada", "decidido_at": "now()"
                 }).eq("id", rec_id).execute()
@@ -926,7 +927,7 @@ async def telegram_webhook(request: Request):
                     "usuario_id": callback_user_id,
                     "recomendacion_id": rec_id,
                     "accion": "aceptada",
-                    "precio_entrada": rec.data.get("precio_recomendacion"),
+                    "precio_entrada": rec.get("precio_recomendacion"),
                 }).execute()
                 if token:
                     await _answer_callback(callback_id, token)
@@ -936,8 +937,9 @@ async def telegram_webhook(request: Request):
         # Rechazar recomendación de inversión
         elif parts[0] == "inv_no" and len(parts) == 2:
             rec_id = int(parts[1])
-            rec = supabase.table("recomendaciones").select("id, estado").eq("id", rec_id).eq("usuario_id", callback_user_id).maybe_single().execute()
-            if rec.data and rec.data["estado"] == "pendiente":
+            rec_r = supabase.table("recomendaciones").select("id, estado").eq("id", rec_id).eq("usuario_id", callback_user_id).limit(1).execute()
+            rec = rec_r.data[0] if rec_r.data else None
+            if rec and rec["estado"] == "pendiente":
                 supabase.table("recomendaciones").update({
                     "estado": "rechazada", "decidido_at": "now()"
                 }).eq("id", rec_id).execute()
@@ -997,14 +999,14 @@ async def telegram_webhook(request: Request):
     if text.lower().startswith("/inversiones"):
         if token:
             supabase = get_supabase()
-            perfil_r = supabase.table("perfiles_inversion").select("*").eq("usuario_id", user_id).maybe_single().execute()
-            if not perfil_r.data:
+            perfil_r = supabase.table("perfiles_inversion").select("*").eq("usuario_id", user_id).limit(1).execute()
+            p = perfil_r.data[0] if perfil_r.data else None
+            if not p:
                 await _send(chat_id,
                     "📈 *Módulo de Inversiones*\n\n"
                     "Todavía no configuraste tu perfil de inversión.\n"
                     "Entrá al dashboard → pestaña *Inversiones* para configurarlo.", token)
             else:
-                p = perfil_r.data
                 # Mostrar recomendaciones pendientes
                 recs_r = supabase.table("recomendaciones").select(
                     "*, activos(codigo, nombre)"
