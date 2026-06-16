@@ -269,8 +269,7 @@ async def fetch_precio_activo(activo: dict) -> dict | None:
     fuente = activo["fuente"]
     simbolo = activo["simbolo_fuente"]
 
-    if fuente == "binance":
-        # binance → usar CoinGecko (Binance bloquea Vercel)
+    if fuente in ("binance", "coingecko"):
         return await fetch_coingecko_precio(simbolo)
 
     if fuente == "iol":
@@ -287,7 +286,7 @@ async def fetch_historico_activo(activo: dict, limite: int = 60) -> list[float]:
     fuente = activo["fuente"]
     simbolo = activo["simbolo_fuente"]
 
-    if fuente == "binance":
+    if fuente in ("binance", "coingecko"):
         return await fetch_coingecko_historico(simbolo, limit=limite)
 
     if fuente == "iol":
