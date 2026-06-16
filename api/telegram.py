@@ -1493,6 +1493,18 @@ async def telegram_webhook(request: Request):
         perfil_check = supabase_check.table("perfiles_inversion").select("*").eq("usuario_id", user_id).limit(1).execute()
         estado_perfil = perfil_check.data[0].get("estado") if perfil_check.data else None
 
+        # Catch-all para estados que solo usan botones (objetivos, plazo).
+        # Sin este guard el texto cae en _process_text y crea movimientos fantasma.
+        if estado_perfil and estado_perfil.startswith("configurando_") and estado_perfil not in (
+            "configurando_capital", "configurando_descripcion",
+            "configurando_activos", "configurando_portafolio",
+        ):
+            await _send(chat_id,
+                "📋 Usá los botones del mensaje anterior para continuar.\n"
+                "Si no los ves, enviá /inversiones para retomar el setup.",
+                token, parse_mode="")
+            return JSONResponse({"ok": True})
+
         if estado_perfil == "configurando_capital":
             clean = text.replace(".", "").replace(",", "").replace("$", "").strip()
             if text.lower() in ("skip", "/skip"):
@@ -1500,9 +1512,11 @@ async def telegram_webhook(request: Request):
             else:
                 try:
                     capital = float(clean)
+                    if capital <= 0:
+                        raise ValueError("capital debe ser positivo")
                 except ValueError:
                     await _send(chat_id,
-                        "No entendí el monto. Enviá solo el número (ej: `500000`) o escribí `skip` para omitirlo.", token)
+                        "No entendí el monto. Enviá solo el número positivo (ej: `500000`) o escribí `skip` para omitirlo.", token)
                     return JSONResponse({"ok": True})
 
             upd: dict = {"estado": "configurando_descripcion", "actualizado_at": "now()"}

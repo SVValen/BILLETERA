@@ -72,11 +72,22 @@ async def _actualizar_activo(activo: dict, supabase) -> dict | None:
 
     supabase.table("activos").update(update_data).eq("id", activo["id"]).execute()
 
-    # Guardar en historial de precios (para análisis futuro)
-    supabase.table("precios_historicos").insert({
-        "activo_id": activo["id"],
-        "precio": precio_data["precio"],
-    }).execute()
+    # Insertar en historial solo si no hay registro en los últimos 20 min (idempotencia ante doble ejecución)
+    from datetime import datetime, timedelta, timezone
+    cutoff = (datetime.now(timezone.utc) - timedelta(minutes=20)).isoformat()
+    reciente = (
+        supabase.table("precios_historicos")
+        .select("id")
+        .eq("activo_id", activo["id"])
+        .gte("timestamp", cutoff)
+        .limit(1)
+        .execute()
+    )
+    if not reciente.data:
+        supabase.table("precios_historicos").insert({
+            "activo_id": activo["id"],
+            "precio": precio_data["precio"],
+        }).execute()
 
     return {**activo, **update_data, "moneda": activo["moneda"]}
 
