@@ -7,14 +7,16 @@ import ResumenTab from './ResumenTab'
 import PresupuestosTab from './PresupuestosTab'
 import ObjetivosTab from './ObjetivosTab'
 import MovimientosTab from './MovimientosTab'
+import InversionesTab from './InversionesTab'
 
-type Tab = 'resumen' | 'presupuestos' | 'objetivos' | 'movimientos'
+type Tab = 'resumen' | 'presupuestos' | 'objetivos' | 'movimientos' | 'inversiones'
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'resumen', label: 'Resumen' },
   { id: 'presupuestos', label: 'Presupuestos' },
   { id: 'objetivos', label: 'Objetivos' },
   { id: 'movimientos', label: 'Movimientos' },
+  { id: 'inversiones', label: '📈 Inversiones' },
 ]
 
 export default function Dashboard() {
@@ -66,6 +68,7 @@ export default function Dashboard() {
 
   const showMes = tab === 'resumen' || tab === 'presupuestos' || tab === 'movimientos'
 
+
   return (
     <>
       {/* Nav */}
@@ -104,6 +107,7 @@ export default function Dashboard() {
         {tab === 'presupuestos' && <PresupuestosTab mes={mes} />}
         {tab === 'objetivos' && <ObjetivosTab />}
         {tab === 'movimientos' && <MovimientosTab mes={mes} />}
+        {tab === 'inversiones' && <InversionesTab />}
       </div>
     </>
   )
