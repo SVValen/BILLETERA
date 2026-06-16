@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS perfiles_inversion (
   objetivo VARCHAR(50),  -- pasivos, ahorro_corto, largo_plazo, preservacion
   capital_disponible DECIMAL(15,2),
   notas TEXT,
+  estado VARCHAR(30) DEFAULT 'activo',  -- activo | configurando_capital
   creado_at TIMESTAMPTZ DEFAULT NOW(),
   actualizado_at TIMESTAMPTZ DEFAULT NOW()
 );

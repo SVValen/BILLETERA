@@ -210,12 +210,19 @@ async def _answer_callback(callback_id: str, token: str) -> None:
         )
 
 
-async def _edit_message(chat_id: int, message_id: int, text: str, token: str) -> None:
+async def _edit_message(chat_id: int, message_id: int, text: str, token: str,
+                        parse_mode: str = "Markdown", reply_markup: dict | None = None) -> None:
     import httpx
+    payload: dict = {"chat_id": chat_id, "message_id": message_id, "text": text}
+    if parse_mode:
+        payload["parse_mode"] = parse_mode
+    if reply_markup:
+        import json as _json
+        payload["reply_markup"] = _json.dumps(reply_markup)
     async with httpx.AsyncClient() as client:
         await client.post(
             f"https://api.telegram.org/bot{token}/editMessageText",
-            json={"chat_id": chat_id, "message_id": message_id, "text": text},
+            json=payload,
         )
 
 
@@ -310,6 +317,64 @@ async def _check_presupuesto_alert(
             f"⚠️ {c['emoji']} *{c['nombre']}*: {pct:.0f}% del presupuesto\n"
             f"Quedan: ${presupuestado - total:,.0f}",
             token, parse_mode="Markdown")
+
+
+async def _handle_inversiones_cmd(user_id: str, chat_id: int, token: str) -> None:
+    supabase = get_supabase()
+    perfil_r = supabase.table("perfiles_inversion").select("*").eq("usuario_id", user_id).limit(1).execute()
+    p = perfil_r.data[0] if perfil_r.data else None
+
+    if not p:
+        await _send(chat_id,
+            "📈 *Módulo de Inversiones*\n\n"
+            "Elegí tu perfil de riesgo para empezar:",
+            token,
+            reply_markup={
+                "inline_keyboard": [[
+                    {"text": "🛡️ Conservador", "callback_data": "inv_perfil:conservador"},
+                    {"text": "⚖️ Moderado",    "callback_data": "inv_perfil:moderado"},
+                    {"text": "🚀 Arriesgado",  "callback_data": "inv_perfil:arriesgado"},
+                ]]
+            })
+        return
+
+    # Perfil existente → mostrar resumen
+    perfil_emoji = {"conservador": "🛡️", "moderado": "⚖️", "arriesgado": "🚀"}.get(p["perfil"], "📈")
+    lines = [f"📈 *Inversiones* — {perfil_emoji} {p['perfil'].capitalize()}"]
+    if p.get("capital_disponible"):
+        lines.append(f"💰 Capital: ${p['capital_disponible']:,.0f}")
+
+    recs_r = (
+        supabase.table("recomendaciones")
+        .select("*, activos(codigo, nombre)")
+        .eq("usuario_id", user_id)
+        .eq("estado", "pendiente")
+        .order("generado_at", desc=True)
+        .limit(3)
+        .execute()
+    )
+    if recs_r.data:
+        lines.append(f"\n⏳ *{len(recs_r.data)} recomendación(es) pendiente(s):*")
+        for r in recs_r.data:
+            a = r.get("activos") or {}
+            emoji = "🟢" if r["accion"] == "comprar" else "🔴" if r["accion"] == "vender" else "🟡"
+            lines.append(f"{emoji} {r['accion'].upper()} {a.get('codigo', '?')} — confianza {r['confianza']}/10")
+    else:
+        lines.append("\n✅ Sin señales ahora. El sistema revisa cada 30 minutos.")
+
+    stats_r = supabase.table("decisiones_inversion").select("resultado, accion").eq("usuario_id", user_id).execute()
+    decisiones = stats_r.data or []
+    aceptadas = [d for d in decisiones if d["accion"] == "aceptada"]
+    exitosas = [d for d in aceptadas if d["resultado"] == "exitoso"]
+    if aceptadas:
+        winrate = round(len(exitosas) / len(aceptadas) * 100)
+        lines.append(f"\n🎯 Winrate: {winrate}% ({len(exitosas)}/{len(aceptadas)})")
+
+    lines.append("\n_/inversiones para actualizar_")
+    await _send(chat_id, "\n".join(lines), token,
+        reply_markup={"inline_keyboard": [[
+            {"text": "✏️ Cambiar perfil", "callback_data": "inv_cambiar_perfil"},
+        ]]})
 
 
 async def _handle_presupuesto_cmd(user_id: str, chat_id: int, args: str, token: str) -> None:
@@ -914,6 +979,38 @@ async def telegram_webhook(request: Request):
                 await _answer_callback(callback_id, token)
                 await _edit_message(chat_id, message_id, "✕ Cancelado.", token)
 
+        # Elegir / cambiar perfil de inversión
+        elif parts[0] == "inv_perfil" and len(parts) == 2:
+            tipo = parts[1]
+            if tipo in ("conservador", "moderado", "arriesgado"):
+                supabase.table("perfiles_inversion").upsert({
+                    "usuario_id": callback_user_id,
+                    "perfil": tipo,
+                    "estado": "configurando_capital",
+                    "actualizado_at": "now()",
+                }, on_conflict="usuario_id").execute()
+                perfil_emoji = {"conservador": "🛡️", "moderado": "⚖️", "arriesgado": "🚀"}[tipo]
+                if token:
+                    await _answer_callback(callback_id, token)
+                    await _edit_message(chat_id, message_id,
+                        f"✅ Perfil *{perfil_emoji} {tipo}* guardado.\n\n"
+                        "💰 ¿Cuánto capital tenés disponible para invertir? (en ARS)\n"
+                        "_Respondé con un número, ej: 500000_\n"
+                        "_O escribí /skip para omitir_", token)
+
+        elif parts[0] == "inv_cambiar_perfil":
+            if token:
+                await _answer_callback(callback_id, token)
+                await _edit_message(chat_id, message_id,
+                    "📈 Elegí tu nuevo perfil de riesgo:", token,
+                    reply_markup={
+                        "inline_keyboard": [[
+                            {"text": "🛡️ Conservador", "callback_data": "inv_perfil:conservador"},
+                            {"text": "⚖️ Moderado",    "callback_data": "inv_perfil:moderado"},
+                            {"text": "🚀 Arriesgado",  "callback_data": "inv_perfil:arriesgado"},
+                        ]]
+                    })
+
         # Aceptar recomendación de inversión
         elif parts[0] == "inv_ok" and len(parts) == 2:
             rec_id = int(parts[1])
@@ -984,6 +1081,34 @@ async def telegram_webhook(request: Request):
     if not text:
         return JSONResponse({"ok": True})
 
+    # ── Capital de inversión (respuesta al setup de perfil) ───────────────────
+    if token and not text.startswith("/"):
+        supabase_check = get_supabase()
+        perfil_check = supabase_check.table("perfiles_inversion").select("estado").eq("usuario_id", user_id).limit(1).execute()
+        if perfil_check.data and perfil_check.data[0].get("estado") == "configurando_capital":
+            if text.lower() == "/skip" or text.lower() == "skip":
+                supabase_check.table("perfiles_inversion").update({"estado": "activo"}).eq("usuario_id", user_id).execute()
+                await _send(chat_id, "✅ Perfil configurado. Vas a recibir recomendaciones cuando haya señales.", token)
+            else:
+                # Intentar parsear como número
+                clean = text.replace(".", "").replace(",", "").replace("$", "").strip()
+                try:
+                    capital = float(clean)
+                    supabase_check.table("perfiles_inversion").update({
+                        "capital_disponible": capital,
+                        "estado": "activo",
+                        "actualizado_at": "now()",
+                    }).eq("usuario_id", user_id).execute()
+                    await _send(chat_id,
+                        f"✅ *Perfil completo*\n"
+                        f"💰 Capital: ${capital:,.0f}\n\n"
+                        "El sistema va a analizar activos cada 30 minutos y te va a avisar cuando haya señales.\n"
+                        "Usá /inversiones para ver el estado en cualquier momento.", token)
+                except ValueError:
+                    await _send(chat_id,
+                        "No entendí el monto. Enviá solo el número (ej: `500000`) o escribí `skip` para omitirlo.", token)
+            return JSONResponse({"ok": True})
+
     if text.startswith("/id"):
         if token:
             await _send(chat_id,
@@ -998,40 +1123,7 @@ async def telegram_webhook(request: Request):
 
     if text.lower().startswith("/inversiones"):
         if token:
-            supabase = get_supabase()
-            perfil_r = supabase.table("perfiles_inversion").select("*").eq("usuario_id", user_id).limit(1).execute()
-            p = perfil_r.data[0] if perfil_r.data else None
-            if not p:
-                await _send(chat_id,
-                    "📈 *Módulo de Inversiones*\n\n"
-                    "Todavía no configuraste tu perfil de inversión.\n"
-                    "Entrá al dashboard → pestaña *Inversiones* para configurarlo.", token)
-            else:
-                # Mostrar recomendaciones pendientes
-                recs_r = supabase.table("recomendaciones").select(
-                    "*, activos(codigo, nombre)"
-                ).eq("usuario_id", user_id).eq("estado", "pendiente").order("generado_at", desc=True).limit(3).execute()
-
-                lines = [f"📈 *Inversiones* — perfil: {p['perfil']}\n"]
-                if recs_r.data:
-                    lines.append(f"⏳ *{len(recs_r.data)} recomendación(es) pendiente(s):*")
-                    for r in recs_r.data:
-                        a = r.get("activos") or {}
-                        emoji = "🟢" if r["accion"] == "comprar" else "🔴" if r["accion"] == "vender" else "🟡"
-                        lines.append(f"{emoji} {r['accion'].upper()} {a.get('codigo','?')} — confianza {r['confianza']}/10")
-                else:
-                    lines.append("✅ Sin recomendaciones pendientes. El sistema revisa cada 30 minutos.")
-
-                # Stats rápidas
-                stats_r = supabase.table("decisiones_inversion").select("resultado, accion").eq("usuario_id", user_id).execute()
-                decisiones = stats_r.data or []
-                aceptadas = [d for d in decisiones if d["accion"] == "aceptada"]
-                exitosas = [d for d in aceptadas if d["resultado"] == "exitoso"]
-                if aceptadas:
-                    winrate = round(len(exitosas) / len(aceptadas) * 100)
-                    lines.append(f"\n🎯 Winrate: {winrate}% ({len(exitosas)}/{len(aceptadas)} decisiones)")
-
-                await _send(chat_id, "\n".join(lines), token)
+            await _handle_inversiones_cmd(user_id, chat_id, token)
         return JSONResponse({"ok": True})
 
     if text.lower().startswith("/recurrentes"):
