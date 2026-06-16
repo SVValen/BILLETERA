@@ -1280,7 +1280,7 @@ async def telegram_webhook(request: Request):
             if plazo in ("corto", "mediano", "largo"):
                 supabase.table("perfiles_inversion").update({
                     "plazo": plazo,
-                    "estado": "configurando_capital",
+                    "estado": "configurando_moneda",
                     "actualizado_at": "now()",
                 }).eq("usuario_id", callback_user_id).execute()
                 plazo_label = {"corto": "< 1 año", "mediano": "1-3 años", "largo": "+ 3 años"}[plazo]
@@ -1288,6 +1288,27 @@ async def telegram_webhook(request: Request):
                     await _answer_callback(callback_id, token)
                     await _edit_message(chat_id, message_id,
                         f"✅ Plazo: *{plazo_label}*\n\n"
+                        "💱 *¿Preferís invertir en pesos o dólares?*",
+                        token,
+                        reply_markup={"inline_keyboard": [
+                            [{"text": "🇦🇷 Pesos (ARS)", "callback_data": "inv_moneda:ARS"}],
+                            [{"text": "🇺🇸 Dólares (USD)", "callback_data": "inv_moneda:USD"}],
+                            [{"text": "⚖️ Ambas monedas", "callback_data": "inv_moneda:ambas"}],
+                        ]})
+
+        elif parts[0] == "inv_moneda" and len(parts) == 2:
+            moneda = parts[1]
+            if moneda in ("ARS", "USD", "ambas"):
+                supabase.table("perfiles_inversion").update({
+                    "moneda_preferida": moneda,
+                    "estado": "configurando_capital",
+                    "actualizado_at": "now()",
+                }).eq("usuario_id", callback_user_id).execute()
+                moneda_label = {"ARS": "Pesos 🇦🇷", "USD": "Dólares 🇺🇸", "ambas": "Ambas monedas ⚖️"}[moneda]
+                if token:
+                    await _answer_callback(callback_id, token)
+                    await _edit_message(chat_id, message_id,
+                        f"✅ Moneda: *{moneda_label}*\n\n"
                         "💰 *¿Cuánto capital tenés disponible para invertir?* (en ARS)\n"
                         "_Respondé con un número, ej: `500000`_\n"
                         "_O escribí `skip` para omitirlo_",
@@ -1572,6 +1593,7 @@ async def telegram_webhook(request: Request):
                 capital=perfil_data.get("capital_disponible"),
                 descripcion=descripcion,
                 activos_disponibles=activos_disponibles,
+                moneda_preferida=perfil_data.get("moneda_preferida", "ARS"),
             )
 
             if sugerencia:
@@ -1812,6 +1834,38 @@ async def telegram_webhook(request: Request):
     if text.lower().startswith("/portafolio"):
         if token:
             await _handle_portafolio_cmd(user_id, chat_id, token)
+        return JSONResponse({"ok": True})
+
+    if text.lower().startswith("/como_funciona"):
+        if token:
+            await _send(chat_id,
+                "🤖 *Cómo funciona el sistema de recomendaciones*\n\n"
+                "*1. Actualización de precios* (cada ~30 min)\n"
+                "El cron obtiene el precio actual de cada activo de tu portafolio "
+                "y calcula dos indicadores técnicos:\n\n"
+                "*RSI (Índice de Fuerza Relativa)*\n"
+                "Mide si un activo está sobrecomprado o sobrevendido en base a los "
+                "últimos 14 períodos de precio:\n"
+                "  • RSI < 35 → sobreventa (posible oportunidad de compra)\n"
+                "  • RSI > 65 → sobrecompra (posible señal de venta)\n"
+                "  • Entre 35 y 65 → neutral, sin señal\n\n"
+                "*EMA (Media Móvil Exponencial)*\n"
+                "Compara la EMA de 20 períodos con la de 50 para detectar tendencia:\n"
+                "  • EMA20 sube → tendencia alcista\n"
+                "  • EMA20 baja → tendencia bajista\n"
+                "  • Sin cambio → lateral\n\n"
+                "*2. Generación de recomendación*\n"
+                "Solo cuando hay señal (RSI extremo), Claude analiza el contexto completo:\n"
+                "  • Tu perfil de riesgo (conservador/moderado/arriesgado)\n"
+                "  • Tus objetivos y plazo\n"
+                "  • El winrate de tus decisiones anteriores\n"
+                "  • El contexto argentino (inflación, tipo de cambio)\n\n"
+                "El resultado es: acción (comprar/vender/mantener) + razón + confianza del 1 al 10.\n\n"
+                "*3. Anti-spam*\n"
+                "Si ya tenés una recomendación pendiente para un activo, no genera otra hasta que la respondas.\n\n"
+                "💡 La confianza baja (1-5) suele significar señal débil o contexto incierto. "
+                "Confianza 7+ indica señal más clara.",
+                token)
         return JSONResponse({"ok": True})
 
     if text.lower().startswith("/precios"):

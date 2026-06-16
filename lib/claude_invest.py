@@ -119,6 +119,7 @@ def sugerir_activos_para_perfil(
     capital: float | None,
     descripcion: str,
     activos_disponibles: list[dict],
+    moneda_preferida: str = "ARS",
 ) -> dict | None:
     """
     Retorna:
@@ -133,6 +134,13 @@ def sugerir_activos_para_perfil(
     plazo_txt = _PLAZO_DESC.get(plazo, plazo or "no especificado")
     capital_txt = f"${capital:,.0f} ARS" if capital else "no especificado"
 
+    _moneda_desc = {
+        "ARS": "prefiere activos en pesos (acciones argentinas, activos locales)",
+        "USD": "prefiere activos en dólares (CEDEARs de empresas USA, crypto)",
+        "ambas": "abierto a activos en pesos y dólares, busca diversificar monedas",
+    }
+    moneda_txt = _moneda_desc.get(moneda_preferida, moneda_preferida)
+
     activos_txt = "\n".join(
         f"- {a['codigo']}: {a['nombre']} (tipo: {a['tipo']}, moneda: {a['moneda']})"
         for a in activos_disponibles
@@ -144,6 +152,7 @@ PERFIL:
 - Objetivos: {obj_txt}
 - Plazo: {plazo_txt}
 - Capital: {capital_txt}
+- Preferencia de moneda: {moneda_txt}
 - En sus palabras: "{descripcion or 'no especificó'}"
 
 ACTIVOS DISPONIBLES:
@@ -151,13 +160,14 @@ ACTIVOS DISPONIBLES:
 
 Tarea:
 1. Derivá el perfil de riesgo (conservador/moderado/arriesgado).
-2. Seleccioná 2-4 activos principales. Para cada uno:
+2. Seleccioná 2-4 activos principales RESPETANDO la preferencia de moneda del usuario. Para cada uno:
    - "razon": por qué encaja (1 línea, informal)
    - "explicacion": qué es y cómo funciona en Argentina (2-3 oraciones simples)
 3. Listá otros activos no seleccionados que podrían interesar (máx 3).
 4. Resumen general (1-2 oraciones, español informal).
 
-Reglas: CEDEARs = cobertura cambiaria. Crypto = volatilidad alta. Plazo corto → evitar crypto.
+Reglas: CEDEARs = cobertura cambiaria (moneda USD). Crypto = volatilidad alta (moneda USD). Acciones AR = pesos.
+Plazo corto → evitar crypto. Si prefiere ARS → priorizar acciones argentinas. Si prefiere USD → priorizar CEDEARs/crypto.
 Múltiples objetivos → diversificar.
 
 Respondé SOLO en JSON válido:

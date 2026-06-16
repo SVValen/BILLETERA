@@ -11,9 +11,10 @@ CREATE TABLE IF NOT EXISTS perfiles_inversion (
   objetivo VARCHAR(50),                 -- ingresos_pasivos, crecimiento, cobertura, meta_especifica
   plazo VARCHAR(20),                    -- corto, mediano, largo
   capital_disponible DECIMAL(15,2),
+  moneda_preferida VARCHAR(10) DEFAULT 'ARS',  -- ARS, USD, ambas
   descripcion_libre TEXT,               -- texto libre del usuario (input para Claude)
   notas TEXT,
-  estado VARCHAR(30) DEFAULT 'activo',  -- activo | configurando_plazo | configurando_capital | configurando_descripcion | configurando_activos
+  estado VARCHAR(30) DEFAULT 'activo',  -- activo | configurando_moneda | configurando_plazo | configurando_capital | configurando_descripcion | configurando_activos
   creado_at TIMESTAMPTZ DEFAULT NOW(),
   actualizado_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -112,7 +113,7 @@ INSERT INTO activos (codigo, nombre, tipo, fuente, simbolo_fuente, moneda) VALUE
   ('GOOGL','Google (CEDEAR)', 'cedear', 'iol', 'GOOGL',   'ARS'),
   ('MSFT', 'Microsoft (CEDEAR)', 'cedear', 'iol', 'MSFT', 'ARS'),
   ('GGAL', 'Grupo Galicia', 'accion_ar', 'iol', 'GGAL',  'ARS'),
-  ('YPF',  'YPF',       'accion_ar', 'iol', 'YPF',        'ARS')
+  ('YPF',  'YPF (YPFD)', 'accion_ar', 'iol', 'YPFD',       'ARS')
 ON CONFLICT (codigo) DO NOTHING;
 
 -- RLS permissive (mismo patrón que el resto del proyecto)
