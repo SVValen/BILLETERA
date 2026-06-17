@@ -24,9 +24,10 @@ AYUDA = (
 
     "🎤 *Audio* — mandá un mensaje de voz.\n\n"
 
-    "📊 *Inversiones — Renta Variable:*\n"
-    "  `/inversiones` — configurar perfil / ver recomendaciones\n"
-    "  `/inversiones reset` — reiniciar el wizard de configuración\n"
+    "📊 *Portafolios de inversión:*\n"
+    "  `/portafolio_nuevo` — crear un nuevo portafolio\n"
+    "  `/mis_portafolios` — ver todos tus portafolios activos\n"
+    "  `/inversiones reset` — cancelar wizard en progreso\n"
     "  `/portafolio` — distribución de activos y P&L\n"
     "  `/precios` — cotizaciones en tiempo real\n"
     "  `/como_funciona` — cómo se calculan las señales\n\n"

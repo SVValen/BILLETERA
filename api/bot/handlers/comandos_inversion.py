@@ -4,14 +4,17 @@ from ..tg import _send
 
 
 async def _handle_inversiones_cmd(user_id: str, chat_id: int, token: str) -> None:
-    from .wizard_inversion import _send_objetivos_keyboard
+    from .wizard_inversion import _send_tipo_keyboard
     supabase = get_supabase()
-    perfil_r = supabase.table("perfiles_inversion").select("*").eq("usuario_id", user_id).limit(1).execute()
-    p = perfil_r.data[0] if perfil_r.data else None
 
-    if not p:
-        await _send_objetivos_keyboard(user_id, chat_id, token, supabase)
+    # Verificar si tiene portafolios activos
+    port_r = supabase.table("portafolios").select("id").eq("usuario_id", user_id).eq("activo", True).eq("estado_wizard", "activo").limit(1).execute()
+    if not port_r.data:
+        await _send(chat_id, "No tenés portafolios activos. Creá uno con /portafolio_nuevo.", token, parse_mode="")
         return
+
+    # Compatibilidad Fase 4 pendiente: mostrar recomendaciones básicas
+    p = {}  # TODO Fase 4: reemplazar con datos de portafolios
 
     obj_labels = {
         "ingresos_pasivos": "💰 Ingresos pasivos",
@@ -136,7 +139,7 @@ async def _handle_precios_cmd(user_id: str, chat_id: int, token: str) -> None:
     await _send(chat_id, "\n".join(lines), token)
 
 
-async def _handle_liquidez_cmd(user_id: str, chat_id: int, token: str) -> None:
+async def _handle_liquidez_cmd(user_id: str, chat_id: int, token: str, portafolio: dict | None = None) -> None:
     from lib.market_data import fetch_dolar_precio, fetch_caucion_tna
     from lib.rf_analysis import analizar_carry_trade, calcular_rendimiento_usd, calcular_allocation, evaluar_vencimientos
 
@@ -207,7 +210,7 @@ async def _handle_liquidez_cmd(user_id: str, chat_id: int, token: str) -> None:
     await _send(chat_id, "\n".join(lines), token)
 
 
-async def _handle_portafolio_cmd(user_id: str, chat_id: int, token: str) -> None:
+async def _handle_portafolio_cmd(user_id: str, chat_id: int, token: str, portafolio: dict | None = None) -> None:
     supabase = get_supabase()
 
     ua_r = supabase.table("usuario_activos").select("activo_id, porcentaje, monto_ars, precio_entrada").eq("usuario_id", user_id).execute()

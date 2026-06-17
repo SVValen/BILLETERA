@@ -6,11 +6,12 @@ from .constants import AYUDA
 from .keyboards import _recent_movements_keyboard
 from .callbacks.movimiento_callbacks import handle_movimiento_callback
 from .callbacks.recomendacion_callbacks import handle_recomendacion_callback
-from .handlers.wizard_inversion import handle_wizard_callback, handle_wizard_text, _send_objetivos_keyboard
+from .handlers.wizard_inversion import handle_wizard_callback, handle_wizard_text, _send_tipo_keyboard
 from .handlers.posiciones_rf import handle_rf_callback, _parse_posicion_rf, _handle_nueva_posicion_rf
 from .handlers.movimientos import _process_text
 from .handlers.presupuestos import _handle_presupuesto_cmd
 from .handlers.comandos_inversion import _handle_inversiones_cmd, _handle_precios_cmd, _handle_liquidez_cmd, _handle_portafolio_cmd
+from .middleware_portafolio import resolver_portafolio, handle_psel_callback
 
 
 async def dispatch_callback(cq: dict, token: str) -> None:
@@ -29,6 +30,8 @@ async def dispatch_callback(cq: dict, token: str) -> None:
     if await handle_recomendacion_callback(parts, callback_id, chat_id, message_id, user_id, supabase, token):
         return
     if await handle_rf_callback(parts, callback_id, chat_id, message_id, user_id, supabase, token):
+        return
+    if await handle_psel_callback(parts, callback_id, chat_id, message_id, user_id, token):
         return
 
 
@@ -53,14 +56,11 @@ async def dispatch_message(message: dict, token: str) -> None:
             await _send(chat_id, "No pude entender el audio 🙁", token, parse_mode="")
             return
         await _send(chat_id, f'🗣 _"{transcribed}"_', token)
-        # Si el usuario está en paso de texto libre del wizard, el audio actúa como texto
-        _perfil_estado_r = get_supabase().table("perfiles_inversion").select("estado").eq("usuario_id", user_id).limit(1).execute()
-        _estado_inv = _perfil_estado_r.data[0].get("estado") if _perfil_estado_r.data else None
-        if _estado_inv in ("configurando_capital", "configurando_descripcion", "configurando_activos"):
-            text = transcribed
-        else:
-            await _process_text(transcribed, user_id, chat_id, token)
+        # Si el usuario está en un paso de texto del wizard, el audio actúa como texto
+        if await handle_wizard_text(transcribed, user_id, chat_id, token):
             return
+        await _process_text(transcribed, user_id, chat_id, token)
+        return
     else:
         text = message.get("text", "").strip() if "text" in message else ""
 
@@ -69,13 +69,8 @@ async def dispatch_message(message: dict, token: str) -> None:
 
     # ── Wizard: respuestas de texto a pasos del setup ──
     if token and not text.startswith("/"):
-        try:
-            supabase = get_supabase()
-            perfil_check = supabase.table("perfiles_inversion").select("*").eq("usuario_id", user_id).limit(1).execute()
-            if await handle_wizard_text(text, user_id, chat_id, token, supabase, perfil_check):
-                return
-        except Exception:
-            pass
+        if await handle_wizard_text(text, user_id, chat_id, token):
+            return
 
     # ── Comandos ──
     if text.startswith("/id"):
@@ -90,21 +85,31 @@ async def dispatch_message(message: dict, token: str) -> None:
             await _send(chat_id, AYUDA, token)
         return
 
+    if text.lower().startswith("/portafolio_nuevo"):
+        if token:
+            await _send_tipo_keyboard(chat_id, token)
+        return
+
+    if text.lower().startswith("/mis_portafolios"):
+        if token:
+            await _handle_mis_portafolios(user_id, chat_id, token)
+        return
+
     if text.lower().startswith("/inversiones reset"):
         if token:
             supabase = get_supabase()
-            supabase.table("perfiles_inversion").update({
-                "estado": "configurando_objetivos",
-                "objetivos": None,
-                "objetivo": None,
-                "plazo": None,
-                "moneda_preferida": None,
-                "capital_usd": None,
-                "asignacion_rf_pct": None,
-                "descripcion": None,
-            }).eq("usuario_id", user_id).execute()
-            await _send(chat_id, "🔄 Perfil reseteado. Vamos a reconfigurarlo desde cero.")
-            await _send_objetivos_keyboard(user_id, chat_id, token, supabase)
+            deleted = (
+                supabase.table("portafolios")
+                .delete()
+                .eq("usuario_id", user_id)
+                .neq("estado_wizard", "activo")
+                .execute()
+            )
+            n = len(deleted.data) if deleted.data else 0
+            if n:
+                await _send(chat_id, f"🔄 Wizard cancelado ({n} borrador{'s' if n > 1 else ''}). Usá /portafolio_nuevo para empezar.", token)
+            else:
+                await _send(chat_id, "No hay wizards en progreso.", token, parse_mode="")
         return
 
     if text.lower().startswith("/inversiones"):
@@ -114,7 +119,11 @@ async def dispatch_message(message: dict, token: str) -> None:
 
     if text.lower().startswith("/portafolio"):
         if token:
-            await _handle_portafolio_cmd(user_id, chat_id, token)
+            resultado = await resolver_portafolio(user_id, chat_id, token, accion="portafolio")
+            if resultado == "no_portafolios":
+                await _send(chat_id, "No tenés portafolios activos. Usá /portafolio_nuevo para crear uno.", token, parse_mode="")
+            elif resultado != "selection_sent":
+                await _handle_portafolio_cmd(user_id, chat_id, token, portafolio=resultado)
         return
 
     if text.lower().startswith("/como_funciona"):
@@ -156,7 +165,11 @@ async def dispatch_message(message: dict, token: str) -> None:
 
     if text.lower().startswith("/liquidez"):
         if token:
-            await _handle_liquidez_cmd(user_id, chat_id, token)
+            resultado = await resolver_portafolio(user_id, chat_id, token, accion="liquidez")
+            if resultado == "no_portafolios":
+                await _send(chat_id, "No tenés portafolios activos. Usá /portafolio_nuevo para crear uno.", token, parse_mode="")
+            elif resultado != "selection_sent":
+                await _handle_liquidez_cmd(user_id, chat_id, token, portafolio=resultado)
         return
 
     if text.lower().startswith("/iol_debug"):
@@ -241,3 +254,49 @@ async def dispatch_message(message: dict, token: str) -> None:
     # ── Fallback: parsear como movimiento ──
     if token:
         await _process_text(text, user_id, chat_id, token)
+
+
+async def _handle_mis_portafolios(user_id: str, chat_id: int, token: str) -> None:
+    supabase = get_supabase()
+    result = (
+        supabase.table("portafolios")
+        .select("tipo, nombre_personalizado, nombre_sugerido, capital_usd, asignacion_rf_pct, objetivo, plazo, estado_wizard")
+        .eq("usuario_id", user_id)
+        .eq("activo", True)
+        .order("id")
+        .execute()
+    )
+    portafolios = result.data or []
+
+    if not portafolios:
+        await _send(
+            chat_id,
+            "No tenés portafolios activos.\n\nUsá /portafolio_nuevo para crear uno.",
+            token,
+            parse_mode="",
+        )
+        return
+
+    _TIPO_EMOJI = {"conservador": "🛡️", "pasivo": "💰", "crecimiento": "📈", "oportunista": "🎯"}
+    lines = [f"📊 *Tus portafolios* ({len(portafolios)}):\n"]
+
+    for p in portafolios:
+        nombre = p.get("nombre_personalizado") or p.get("nombre_sugerido") or p["tipo"].capitalize()
+        tipo = p["tipo"]
+        emoji = _TIPO_EMOJI.get(tipo, "📊")
+        capital = p.get("capital_usd") or 0
+        rf_pct = p.get("asignacion_rf_pct") or 0
+        objetivo = p.get("objetivo") or "—"
+        plazo = p.get("plazo")
+        estado = p.get("estado_wizard", "activo")
+
+        lines.append(f"{emoji} *{nombre}* ({tipo.capitalize()})")
+        lines.append(f"   Capital: ${capital:,.0f} USD | RF: {rf_pct:.0f}%")
+        if plazo:
+            lines.append(f"   Plazo: {plazo}")
+        lines.append(f"   Objetivo: {objetivo}")
+        if estado != "activo":
+            lines.append(f"   ⚠️ En configuración ({estado})")
+        lines.append("")
+
+    await _send(chat_id, "\n".join(lines).strip(), token)
