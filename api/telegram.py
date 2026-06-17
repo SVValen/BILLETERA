@@ -34,8 +34,7 @@ AYUDA = (
 
     "🔁 *Gasto recurrente* — recordatorio mensual:\n"
     "  `40000 internet todos los 1 del mes`\n"
-    "  `2.49 usd spotify todos los 15 del mes`\n"
-    "  _(el bot te avisa cada mes para confirmar)_\n\n"
+    "  `2.49 usd spotify todos los 15 del mes`\n\n"
 
     "💳 *Compra en cuotas:*\n"
     "  `150000 tele 12 cuotas`\n"
@@ -43,21 +42,27 @@ AYUDA = (
 
     "🎤 *Audio* — mandá un mensaje de voz.\n\n"
 
-    "📋 *Comandos:*\n"
+    "📊 *Inversiones — Renta Variable:*\n"
+    "  `/inversiones` — configurar perfil / ver recomendaciones\n"
+    "  `/inversiones reset` — reiniciar el wizard de configuración\n"
+    "  `/portafolio` — distribución de activos y P&L\n"
+    "  `/precios` — cotizaciones en tiempo real\n"
+    "  `/como_funciona` — cómo se calculan las señales\n\n"
+
+    "💼 *Renta Fija y Liquidez:*\n"
+    "  `/liquidez` — carry trade, posiciones abiertas, P&L en USD\n"
+    "  `puse 500000 en caución 7 días` — registrar posición\n"
+    "  `AL30 200000` — registrar bono\n"
+    "  `lecap 300000 S28F6` — registrar letra\n\n"
+
+    "📋 *Otros comandos:*\n"
     "  `/presupuesto` — ver estado de tus presupuestos\n"
     "  `/presupuesto comida 20000` — fijar presupuesto mensual\n"
-    "    _(categorías: super, comida, transporte, servicios,\n"
-    "    entretenimiento, salud, ropa, vivienda, mascotas,\n"
-    "    viajes, seguros, inversiones, compras, belleza,\n"
-    "    suscripciones, otros)_\n"
-    "  `/editar` — elegir un movimiento reciente para editar\n"
+    "  `/editar` — editar un movimiento reciente\n"
     "  `/editar comida` — filtrar por palabra y editar\n"
-    "  `/borrar` — elegir un movimiento reciente para borrar\n"
+    "  `/borrar` — borrar un movimiento reciente\n"
     "  `/borrar netflix` — filtrar por palabra y borrar\n"
     "  `/recurrentes` — ver tus gastos recurrentes activos\n"
-    "  `/inversiones` — ver recomendaciones y estado del portafolio\n"
-    "  `/portafolio` — ver distribución de activos y P&L\n"
-    "  `/precios` — cotizaciones en tiempo real (BTC, dólar, IOL)\n"
     "  `/id` — tu Telegram ID (para vincular el dashboard)\n"
     "  `/ayuda` — esta guía"
 )
@@ -2106,6 +2111,23 @@ async def telegram_webhook(request: Request):
     if text.lower().startswith(("/ayuda", "/start", "/help")):
         if token:
             await _send(chat_id, AYUDA, token)
+        return JSONResponse({"ok": True})
+
+    if text.lower().startswith("/inversiones reset"):
+        if token:
+            supabase = get_supabase()
+            supabase.table("perfiles_inversion").update({
+                "estado": "configurando_objetivos",
+                "objetivos": None,
+                "objetivo": None,
+                "plazo": None,
+                "moneda_preferida": None,
+                "capital_usd": None,
+                "asignacion_rf_pct": None,
+                "descripcion": None,
+            }).eq("usuario_id", user_id).execute()
+            await _send(chat_id, "🔄 Perfil reseteado. Vamos a reconfigurarlo desde cero.")
+            await _send_objetivos_keyboard(user_id, chat_id, token, supabase)
         return JSONResponse({"ok": True})
 
     if text.lower().startswith("/inversiones"):
