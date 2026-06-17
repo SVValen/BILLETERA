@@ -45,5 +45,8 @@ CREATE INDEX IF NOT EXISTS idx_posrf_vencimiento ON posiciones_rf (fecha_vencimi
 ALTER TABLE instrumentos_rf ENABLE ROW LEVEL SECURITY;
 ALTER TABLE posiciones_rf ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY IF NOT EXISTS "service_role_all_instrumentos_rf" ON instrumentos_rf FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY IF NOT EXISTS "service_role_all_posiciones_rf" ON posiciones_rf FOR ALL USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "service_role_all_instrumentos_rf" ON instrumentos_rf;
+CREATE POLICY "service_role_all_instrumentos_rf" ON instrumentos_rf FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "service_role_all_posiciones_rf" ON posiciones_rf;
+CREATE POLICY "service_role_all_posiciones_rf" ON posiciones_rf FOR ALL USING (true) WITH CHECK (true);
