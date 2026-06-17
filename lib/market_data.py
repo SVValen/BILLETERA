@@ -293,3 +293,81 @@ async def fetch_historico_activo(activo: dict, limite: int = 60) -> list[float]:
         return await fetch_iol_historico(simbolo, dias=limite)
 
     return []
+
+
+# ============================================================
+# Renta Fija — IOL (bonos, letras) y cauciones
+# ============================================================
+
+async def fetch_iol_rf(ticker: str) -> dict | None:
+    """
+    Retorna datos de un instrumento de renta fija (bono, letra, ON) vía IOL.
+    Usa el mismo endpoint que acciones: /bCBA/Titulos/{ticker}/Cotizacion
+    Campos relevantes: ultimoPrecio, variacion, rendimiento (TIR si disponible).
+    {precio, tna, tir, paridad}
+    """
+    token = await _iol_get_token()
+    if not token:
+        return None
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(
+                f"{IOL_BASE}/api/v2/bCBA/Titulos/{ticker}/Cotizacion",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            if r.status_code == 200:
+                data = r.json()
+                precio = data.get("ultimoPrecio") or data.get("ultimo")
+                if not precio:
+                    logger.warning(f"IOL RF {ticker}: sin precio en respuesta")
+                    return None
+                return {
+                    "precio": float(precio),
+                    "tir": data.get("rendimiento") or data.get("tir"),
+                    "paridad": data.get("paridad"),
+                    "variacion": data.get("variacion") or 0,
+                }
+            logger.warning(f"IOL RF {ticker}: status {r.status_code}")
+    except Exception as e:
+        logger.error(f"IOL RF {ticker}: {e}")
+    return None
+
+
+async def fetch_caucion_tna(plazo_dias: int = 1) -> float | None:
+    """
+    Intenta obtener la TNA de cauciones desde IOL.
+    Si el endpoint no existe o falla, retorna None (el cron usa el último valor guardado).
+    plazo_dias: 1, 7 o 30
+    """
+    token = await _iol_get_token()
+    if not token:
+        return None
+
+    # IOL expone tasas de caución en distintos endpoints según la versión de su API.
+    # Intentamos el endpoint de colocación pasiva para leer la tasa disponible.
+    endpoints_a_probar = [
+        f"{IOL_BASE}/api/v2/Tasas/Caucion/{plazo_dias}",
+        f"{IOL_BASE}/api/v2/Operaciones/Caucion/tasas/{plazo_dias}",
+    ]
+
+    for endpoint in endpoints_a_probar:
+        try:
+            async with httpx.AsyncClient(timeout=8) as client:
+                r = await client.get(
+                    endpoint,
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+                if r.status_code == 200:
+                    data = r.json()
+                    # La respuesta puede ser un número directo o un objeto con campo "tna"/"tasa"
+                    if isinstance(data, (int, float)):
+                        return float(data)
+                    tna = data.get("tna") or data.get("tasa") or data.get("tasaAnual")
+                    if tna:
+                        return float(tna)
+        except Exception:
+            pass
+
+    logger.warning(f"fetch_caucion_tna({plazo_dias}d): ningún endpoint respondió")
+    return None

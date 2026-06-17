@@ -1,0 +1,23 @@
+name: Cron Renta Fija
+
+on:
+  schedule:
+    - cron: '0 15 * * 1-5'  # Lunes a viernes 15:00 UTC (12:00 Argentina)
+  workflow_dispatch:
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Analizar carry trade y alertar vencimientos RF
+        run: |
+          HTTP_CODE=$(curl -s -o /tmp/response.txt -w "%{http_code}" \
+            -X GET \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            https://billetera-gamma.vercel.app/api/cron_rf)
+          echo "HTTP Status: $HTTP_CODE"
+          cat /tmp/response.txt
+          if [ "$HTTP_CODE" -ge 400 ]; then
+            echo "Error: endpoint returned $HTTP_CODE"
+            exit 1
+          fi

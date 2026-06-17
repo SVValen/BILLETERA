@@ -77,7 +77,82 @@ async def inversiones_get(request: Request):
             }
         })
 
-    return JSONResponse({"error": "resource requerido: perfil|activos|recomendaciones|decisiones|ping"}, status_code=400)
+    if resource == "liquidez":
+        from lib.market_data import fetch_dolar_precio
+        from lib.rf_analysis import analizar_carry_trade, calcular_rendimiento_usd, calcular_allocation
+
+        pos_r = (
+            supabase.table("posiciones_rf")
+            .select("*, instrumentos_rf(nombre, tipo, tna_actual, codigo)")
+            .eq("usuario_id", telegram_id)
+            .eq("estado", "activa")
+            .execute()
+        )
+        posiciones = pos_r.data or []
+
+        perfil_r = supabase.table("perfiles_inversion").select("capital_usd, asignacion_rf_pct").eq("usuario_id", telegram_id).limit(1).execute()
+        perfil = perfil_r.data[0] if perfil_r.data else {}
+
+        dolar_data = await fetch_dolar_precio("bolsa")
+        dolar_mep = dolar_data["precio"] if dolar_data else None
+
+        carry = None
+        if dolar_mep:
+            caucion_r = supabase.table("instrumentos_rf").select("tna_actual").eq("codigo", "CAUCION_7D").limit(1).execute()
+            tna_ref = caucion_r.data[0]["tna_actual"] if caucion_r.data and caucion_r.data[0].get("tna_actual") else None
+            if tna_ref:
+                carry = analizar_carry_trade(tna_ref, dolar_mep, None)
+
+        posiciones_con_rdto = []
+        for p in posiciones:
+            rdto = calcular_rendimiento_usd(p, dolar_mep) if dolar_mep else {}
+            posiciones_con_rdto.append({**p, "rendimiento": rdto})
+
+        allocation = calcular_allocation(posiciones, perfil.get("capital_usd") or 0, dolar_mep or 1) if dolar_mep else {}
+
+        return JSONResponse({
+            "posiciones": posiciones_con_rdto,
+            "carry": carry,
+            "allocation": allocation,
+            "dolar_mep": dolar_mep,
+            "capital_usd": perfil.get("capital_usd"),
+            "asignacion_rf_pct": perfil.get("asignacion_rf_pct", 30),
+        })
+
+    if resource == "allocation":
+        from lib.market_data import fetch_dolar_precio
+        from lib.rf_analysis import calcular_allocation
+
+        dolar_data = await fetch_dolar_precio("bolsa")
+        dolar_mep = dolar_data["precio"] if dolar_data else 1
+
+        pos_rf_r = supabase.table("posiciones_rf").select("monto_ars, estado").eq("usuario_id", telegram_id).execute()
+        pos_rf = [p for p in (pos_rf_r.data or []) if p.get("estado") == "activa"]
+
+        ua_r = supabase.table("usuario_activos").select("monto_ars").eq("usuario_id", telegram_id).execute()
+        total_ars_rv = sum(u.get("monto_ars") or 0 for u in (ua_r.data or []))
+        total_usd_rv = total_ars_rv / dolar_mep if dolar_mep else 0
+
+        perfil_r = supabase.table("perfiles_inversion").select("capital_usd, asignacion_rf_pct").eq("usuario_id", telegram_id).limit(1).execute()
+        perfil = perfil_r.data[0] if perfil_r.data else {}
+        capital_usd = perfil.get("capital_usd") or 0
+
+        alloc_rf = calcular_allocation(pos_rf, capital_usd, dolar_mep)
+
+        return JSONResponse({
+            "capital_usd": capital_usd,
+            "dolar_mep": dolar_mep,
+            "renta_fija": alloc_rf,
+            "renta_variable_usd": round(total_usd_rv, 2),
+            "pct_rv": round(total_usd_rv / capital_usd * 100, 1) if capital_usd else 0,
+            "asignacion_rf_objetivo": perfil.get("asignacion_rf_pct", 30),
+        })
+
+    if resource == "instrumentos_rf":
+        r = supabase.table("instrumentos_rf").select("*").eq("activo", True).order("tipo").execute()
+        return JSONResponse(r.data or [])
+
+    return JSONResponse({"error": "resource requerido: perfil|activos|recomendaciones|decisiones|liquidez|allocation|instrumentos_rf|ping"}, status_code=400)
 
 
 @app.post("/api/inversiones")

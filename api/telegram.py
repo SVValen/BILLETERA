@@ -542,6 +542,84 @@ async def _handle_precios_cmd(user_id: str, chat_id: int, token: str) -> None:
     await _send(chat_id, "\n".join(lines), token)
 
 
+async def _handle_liquidez_cmd(user_id: str, chat_id: int, token: str) -> None:
+    """Muestra posiciones RF activas, carry trade actual y análisis de liquidez."""
+    from lib.market_data import fetch_dolar_precio, fetch_caucion_tna
+    from lib.rf_analysis import analizar_carry_trade, calcular_rendimiento_usd, calcular_allocation, evaluar_vencimientos
+
+    supabase = get_supabase()
+
+    # Perfil del usuario
+    perfil_r = supabase.table("perfiles_inversion").select("capital_usd, asignacion_rf_pct").eq("usuario_id", user_id).limit(1).execute()
+    perfil = perfil_r.data[0] if perfil_r.data else {}
+    capital_usd = perfil.get("capital_usd")
+    asignacion_obj = perfil.get("asignacion_rf_pct") or 30
+
+    # Dólar MEP
+    dolar_data = await fetch_dolar_precio("bolsa")
+    dolar_mep = dolar_data["precio"] if dolar_data else None
+
+    # Posiciones activas
+    pos_r = supabase.table("posiciones_rf").select("*, instrumentos_rf(nombre, tipo, tna_actual)").eq("usuario_id", user_id).eq("estado", "activa").execute()
+    posiciones = pos_r.data or []
+
+    lines = ["💼 *Liquidez y Renta Fija*\n"]
+
+    # Carry trade
+    if dolar_mep:
+        caucion_r = supabase.table("instrumentos_rf").select("tna_actual").eq("codigo", "CAUCION_7D").limit(1).execute()
+        tna_ref = caucion_r.data[0]["tna_actual"] if caucion_r.data and caucion_r.data[0].get("tna_actual") else None
+        if tna_ref:
+            carry = analizar_carry_trade(tna_ref, dolar_mep, None)
+            icon = "🟢" if carry["accion"] == "entrar" else "🔴" if carry["accion"] == "salir" else "🟡"
+            lines.append(
+                f"{icon} *Carry trade actual*\n"
+                f"  TNA caución 7D: {tna_ref:.1f}% ({carry['tna_mensual']:.1f}%/mes)\n"
+                f"  Devaluación MEP 30d: ~{carry['devaluacion_mensual']:.1f}%/mes\n"
+                f"  Carry neto: {carry['carry_mensual']:+.1f}% — {carry['accion'].upper()}\n"
+            )
+        else:
+            lines.append("🟡 *Carry trade*: TNA de caución no disponible aún\n")
+
+        lines.append(f"💵 Dólar MEP: ${dolar_mep:,.2f} ARS\n")
+    else:
+        lines.append("⚠️ No se pudo obtener dólar MEP\n")
+
+    # Allocation
+    if capital_usd and dolar_mep:
+        alloc = calcular_allocation(posiciones, capital_usd, dolar_mep)
+        lines.append(
+            f"📊 *Allocation actual*\n"
+            f"  Capital total: ${capital_usd:,.0f} USD\n"
+            f"  En RF: ${alloc['total_usd_rf']:,.0f} USD ({alloc['pct_rf']}%) — objetivo {asignacion_obj}%\n"
+            f"  Libre: ${alloc['total_usd_libre']:,.0f} USD ({alloc['pct_libre']}%)\n"
+        )
+
+    # Posiciones abiertas
+    if posiciones:
+        lines.append("📄 *Posiciones abiertas*\n")
+        for p in posiciones:
+            inst = p.get("instrumentos_rf") or {}
+            nombre = inst.get("nombre") or "instrumento"
+            tna = p.get("tna_contratada") or inst.get("tna_actual") or 0
+            venc = p.get("fecha_vencimiento")
+            venc_txt = f" | vence {venc}" if venc else ""
+            rdto_txt = ""
+            if dolar_mep:
+                rdto = calcular_rendimiento_usd(p, dolar_mep)
+                rdto_txt = f" | {rdto['rendimiento_usd_pct']:+.1f}% USD"
+            lines.append(
+                f"  • {nombre}: ${p['monto_ars']:,.0f} ARS @ {tna:.1f}% TNA{venc_txt}{rdto_txt}"
+            )
+            lines.append(
+                f"    [Rescatar](tg://callback/rf_rescatar:{p['id']})"
+            )
+    else:
+        lines.append("_Sin posiciones RF abiertas._\n\nPara registrar una posición escribí por ejemplo:\n`puse 500000 en caución 7 días`")
+
+    await _send(chat_id, "\n".join(lines), token)
+
+
 async def _handle_portafolio_cmd(user_id: str, chat_id: int, token: str) -> None:
     import json as _json
     supabase = get_supabase()
@@ -844,6 +922,116 @@ async def _save_and_confirm(
         await _check_presupuesto_alert(
             usuario_id=user_id, categoria_id=categoria_id, chat_id=chat_id, token=token
         )
+
+
+import re as _re
+
+_RF_PATRONES = [
+    # "puse 500000 en caución 7 días", "coloqué 1000000 en caución"
+    _re.compile(r"(?:puse|coloqué|coloque|meti|metí|ingresé|ingrese)\s+\$?([\d.,]+)\s+(?:en\s+)?cauc[ií]on?(?:\s+(\d+)\s*d[íi]as?)?", _re.IGNORECASE),
+    # "lecap 300000", "letra 300000 S28F6"
+    _re.compile(r"(?:lecap|letra)\s+\$?([\d.,]+)(?:\s+([A-Z0-9]+))?", _re.IGNORECASE),
+    # "AL30 200000", "GD30 150000"
+    _re.compile(r"\b(AL\d+|GD\d+|AE\d+)\s+\$?([\d.,]+)", _re.IGNORECASE),
+]
+
+def _parse_posicion_rf(text: str) -> dict | None:
+    """Detecta si el usuario está registrando una posición de RF. Retorna datos básicos o None."""
+    t = text.strip()
+
+    # Patrón caución
+    m = _RF_PATRONES[0].search(t)
+    if m:
+        monto_raw = m.group(1).replace(".", "").replace(",", "")
+        plazo = int(m.group(2)) if m.group(2) else 7
+        try:
+            return {"tipo": "caucion", "monto_ars": float(monto_raw), "plazo_dias": plazo, "ticker": None}
+        except ValueError:
+            pass
+
+    # Patrón lecap/letra
+    m = _RF_PATRONES[1].search(t)
+    if m:
+        monto_raw = m.group(1).replace(".", "").replace(",", "")
+        ticker = m.group(2)
+        try:
+            return {"tipo": "letra", "monto_ars": float(monto_raw), "ticker": ticker}
+        except ValueError:
+            pass
+
+    # Patrón bono (AL30, GD30, etc.)
+    m = _RF_PATRONES[2].search(t)
+    if m:
+        ticker = m.group(1).upper()
+        monto_raw = m.group(2).replace(".", "").replace(",", "")
+        try:
+            return {"tipo": "bono_soberano", "monto_ars": float(monto_raw), "ticker": ticker}
+        except ValueError:
+            pass
+
+    return None
+
+
+async def _handle_nueva_posicion_rf(datos: dict, user_id: str, chat_id: int, token: str) -> None:
+    """Confirma con el usuario antes de registrar una posición de RF."""
+    import json as _json
+    import urllib.parse
+    from lib.market_data import fetch_dolar_precio
+
+    supabase = get_supabase()
+    monto_ars = datos["monto_ars"]
+    tipo = datos["tipo"]
+
+    # Buscar instrumento en BD
+    instrumento = None
+    if tipo == "caucion":
+        plazo = datos.get("plazo_dias", 7)
+        codigo = f"CAUCION_{plazo}D"
+        inst_r = supabase.table("instrumentos_rf").select("*").eq("codigo", codigo).limit(1).execute()
+        instrumento = inst_r.data[0] if inst_r.data else None
+    elif datos.get("ticker"):
+        inst_r = supabase.table("instrumentos_rf").select("*").eq("ticker_iol", datos["ticker"].upper()).limit(1).execute()
+        if not inst_r.data:
+            inst_r = supabase.table("instrumentos_rf").select("*").eq("codigo", datos["ticker"].upper()).limit(1).execute()
+        instrumento = inst_r.data[0] if inst_r.data else None
+
+    # Calcular equivalente USD
+    monto_usd = None
+    tipo_cambio = None
+    dolar = await fetch_dolar_precio("bolsa")
+    if dolar and dolar["precio"]:
+        tipo_cambio = dolar["precio"]
+        monto_usd = round(monto_ars / tipo_cambio, 2)
+
+    tna = instrumento.get("tna_actual") if instrumento else None
+    nombre = instrumento.get("nombre") if instrumento else (datos.get("ticker") or tipo)
+    instrumento_id = instrumento["id"] if instrumento else None
+
+    usd_txt = f" (≈${monto_usd:,.0f} USD)" if monto_usd else ""
+    tna_txt = f" @ {tna:.1f}% TNA" if tna else ""
+
+    payload = {
+        "instrumento_id": instrumento_id,
+        "tipo": tipo,
+        "monto_ars": monto_ars,
+        "monto_usd": monto_usd,
+        "tipo_cambio": tipo_cambio,
+        "tna": tna,
+        "notas": datos.get("ticker"),
+    }
+    payload_enc = urllib.parse.quote(_json.dumps(payload))
+
+    await _send(chat_id,
+        f"📄 *Confirmar posición RF*\n\n"
+        f"Instrumento: *{nombre}*\n"
+        f"Monto: ${monto_ars:,.0f} ARS{usd_txt}\n"
+        f"Tipo: {tipo}{tna_txt}\n\n"
+        f"¿Registrar esta posición?",
+        token,
+        reply_markup={"inline_keyboard": [[
+            {"text": "✅ Confirmar", "callback_data": f"rf_confirmar:{payload_enc}"},
+            {"text": "❌ Cancelar",  "callback_data": "rf_cancelar"},
+        ]]})
 
 
 async def _process_text(text: str, user_id: str, chat_id: int, token: str) -> None:
@@ -1309,10 +1497,32 @@ async def telegram_webhook(request: Request):
                     await _answer_callback(callback_id, token)
                     await _edit_message(chat_id, message_id,
                         f"✅ Moneda: *{moneda_label}*\n\n"
-                        "💰 *¿Cuánto capital tenés disponible para invertir?* (en ARS)\n"
-                        "_Respondé con un número, ej: `500000`_\n"
+                        "💰 *¿Cuánto capital tenés disponible para invertir?* (en USD)\n"
+                        "_Respondé con un número, ej: `5000`_\n"
                         "_O escribí `skip` para omitirlo_",
                         token)
+
+        elif parts[0] == "inv_rf_pct" and len(parts) == 2:
+            pct_raw = parts[1]
+            upd_rf: dict = {"estado": "configurando_descripcion", "actualizado_at": "now()"}
+            if pct_raw != "skip":
+                try:
+                    pct = int(pct_raw)
+                    if 0 < pct <= 100:
+                        upd_rf["asignacion_rf_pct"] = pct
+                except ValueError:
+                    pass
+            supabase.table("perfiles_inversion").update(upd_rf).eq("usuario_id", callback_user_id).execute()
+            pct_label = f"{pct_raw}% en RF" if pct_raw != "skip" else "sin objetivo RF"
+            if token:
+                await _answer_callback(callback_id, token)
+                await _edit_message(chat_id, message_id,
+                    f"✅ Asignación RF: *{pct_label}*\n\n"
+                    "📝 *Casi listo.*\n\n"
+                    "Contame en tus propias palabras qué buscás con tus inversiones. "
+                    "Por ejemplo: qué te preocupa, si querés cubrirte del dólar, si ya tenés algo invertido, etc.\n\n"
+                    "_También podés mandar un audio. Escribí `skip` para saltearlo._",
+                    token)
 
         elif parts[0] == "inv_cambiar_perfil":
             if token:
@@ -1362,6 +1572,49 @@ async def telegram_webhook(request: Request):
                 if token:
                     await _answer_callback(callback_id, token)
                     await _edit_message(chat_id, message_id, "❌ Recomendación rechazada.", token)
+
+        # Callbacks de Renta Fija
+        elif parts[0] == "rf_confirmar" and len(parts) >= 2:
+            import json as _json
+            import urllib.parse
+            try:
+                datos = _json.loads(urllib.parse.unquote(":".join(parts[1:])))
+                instrumento_id = datos.get("instrumento_id")
+                supabase.table("posiciones_rf").insert({
+                    "usuario_id": callback_user_id,
+                    "instrumento_id": instrumento_id,
+                    "tipo": datos.get("tipo"),
+                    "monto_ars": datos["monto_ars"],
+                    "monto_usd": datos.get("monto_usd"),
+                    "tipo_cambio_entrada": datos.get("tipo_cambio"),
+                    "tna_contratada": datos.get("tna"),
+                    "fecha_vencimiento": datos.get("fecha_vencimiento"),
+                    "notas": datos.get("notas"),
+                }).execute()
+                if token:
+                    await _answer_callback(callback_id, token)
+                    await _edit_message(chat_id, message_id,
+                        "✅ *Posición registrada.*\n\nUsá /liquidez para ver el estado de tu renta fija.",
+                        token)
+            except Exception as e:
+                if token:
+                    await _answer_callback(callback_id, token, text="Error al registrar posición")
+
+        elif parts[0] == "rf_cancelar":
+            if token:
+                await _answer_callback(callback_id, token)
+                await _edit_message(chat_id, message_id, "Registro cancelado.", token)
+
+        elif parts[0] == "rf_rescatar" and len(parts) == 2:
+            pos_id = int(parts[1])
+            pos_r = supabase.table("posiciones_rf").select("id, usuario_id").eq("id", pos_id).eq("usuario_id", callback_user_id).limit(1).execute()
+            if pos_r.data:
+                supabase.table("posiciones_rf").update({"estado": "rescatada"}).eq("id", pos_id).execute()
+                if token:
+                    await _answer_callback(callback_id, token)
+                    await _edit_message(chat_id, message_id,
+                        "✅ Posición marcada como rescatada. Usá /liquidez para ver el estado actualizado.",
+                        token)
 
         # Toggle de activo en selección de activos
         elif parts[0] == "inv_toggle" and len(parts) == 2:
@@ -1530,6 +1783,7 @@ async def telegram_webhook(request: Request):
         if estado_perfil and estado_perfil.startswith("configurando_") and estado_perfil not in (
             "configurando_capital", "configurando_descripcion",
             "configurando_activos", "configurando_portafolio",
+            "configurando_rf_pct",
         ):
             await _send(chat_id,
                 "📋 Usá los botones del mensaje anterior para continuar.\n"
@@ -1538,30 +1792,58 @@ async def telegram_webhook(request: Request):
             return JSONResponse({"ok": True})
 
         if estado_perfil == "configurando_capital":
-            clean = text.replace(".", "").replace(",", "").replace("$", "").strip()
-            if text.lower() in ("skip", "/skip"):
-                capital = None
+            clean = text.replace(".", "").replace(",", "").replace("$", "").replace("u$s", "").replace("usd", "").strip().lower()
+            clean = clean.replace("u", "").strip() if clean.endswith("u") else clean
+            # Re-limpiar después de quitar sufijos
+            clean = text.replace(".", "").replace(",", "").replace("$", "").replace(" ", "").replace("USD", "").replace("usd", "").replace("U$S", "").strip()
+            if text.lower().strip() in ("skip", "/skip"):
+                capital_usd = None
             else:
                 try:
-                    capital = float(clean)
-                    if capital <= 0:
+                    capital_usd = float(clean)
+                    if capital_usd <= 0:
                         raise ValueError("capital debe ser positivo")
                 except ValueError:
                     await _send(chat_id,
-                        "No entendí el monto. Enviá solo el número positivo (ej: `500000`) o escribí `skip` para omitirlo.", token)
+                        "No entendí el monto. Enviá el número en USD (ej: `5000`) o escribí `skip` para omitirlo.", token)
                     return JSONResponse({"ok": True})
 
-            upd: dict = {"estado": "configurando_descripcion", "actualizado_at": "now()"}
-            if capital is not None:
-                upd["capital_disponible"] = capital
+            # Derivar capital en ARS usando dólar MEP
+            capital_ars = None
+            if capital_usd:
+                try:
+                    from lib.market_data import fetch_dolar_precio
+                    dolar = await fetch_dolar_precio("bolsa")
+                    if dolar:
+                        capital_ars = round(capital_usd * dolar["precio"], 2)
+                except Exception:
+                    pass
+
+            upd: dict = {"estado": "configurando_rf_pct", "actualizado_at": "now()"}
+            if capital_usd is not None:
+                upd["capital_usd"] = capital_usd
+            if capital_ars is not None:
+                upd["capital_disponible"] = capital_ars
             supabase_check.table("perfiles_inversion").update(upd).eq("usuario_id", user_id).execute()
 
+            capital_txt = f"${capital_usd:,.0f} USD" if capital_usd else "no especificado"
             await _send(chat_id,
-                "📝 *Casi listo.*\n\n"
-                "Contame en tus propias palabras qué buscás con tus inversiones. "
-                "Por ejemplo: qué te preocupa, si querés cubrirte del dólar, si ya tenés algo invertido, etc.\n\n"
-                "_También podés mandar un audio. Escribí `skip` para saltearlo._",
-                token)
+                f"✅ Capital: *{capital_txt}*\n\n"
+                "💼 *¿Qué porcentaje querés tener siempre en renta fija (liquidez)?*\n\n"
+                "_La renta fija incluye cauciones, letras y bonos — instrumentos más seguros "
+                "que te permiten no estar en dólares sin perder rendimiento cuando el carry es favorable._\n\n"
+                "_Ej: 30% significa que de tus USD 5000, ~1500 estarían en ARS rentando._",
+                token,
+                reply_markup={"inline_keyboard": [
+                    [{"text": "🛡️ 20% (conservador en RV)", "callback_data": "inv_rf_pct:20"}],
+                    [{"text": "⚖️ 30% (balanceado)",         "callback_data": "inv_rf_pct:30"}],
+                    [{"text": "📈 50% (mitad en liquidez)",  "callback_data": "inv_rf_pct:50"}],
+                    [{"text": "⏭️ Saltar",                   "callback_data": "inv_rf_pct:skip"}],
+                ]})
+            return JSONResponse({"ok": True})
+
+        if estado_perfil == "configurando_rf_pct":
+            # Este estado es solo de botones — el guard superior lo bloquea correctamente
             return JSONResponse({"ok": True})
 
         if estado_perfil == "configurando_descripcion":
@@ -1873,6 +2155,11 @@ async def telegram_webhook(request: Request):
             await _handle_precios_cmd(user_id, chat_id, token)
         return JSONResponse({"ok": True})
 
+    if text.lower().startswith("/liquidez"):
+        if token:
+            await _handle_liquidez_cmd(user_id, chat_id, token)
+        return JSONResponse({"ok": True})
+
     if text.lower().startswith("/iol_debug"):
         if token:
             from lib.market_data import fetch_iol_debug
@@ -1945,6 +2232,13 @@ async def telegram_webhook(request: Request):
             args = text[len("/presupuesto"):].strip()
             await _handle_presupuesto_cmd(user_id, chat_id, args, token)
         return JSONResponse({"ok": True})
+
+    # Parser de posiciones RF: "puse 500000 en caución", "lecap 300000", "AL30 200000"
+    if token:
+        rf_match = _parse_posicion_rf(text)
+        if rf_match:
+            await _handle_nueva_posicion_rf(rf_match, user_id, chat_id, token)
+            return JSONResponse({"ok": True})
 
     if token:
         await _process_text(text, user_id, chat_id, token)

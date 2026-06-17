@@ -318,6 +318,72 @@ Respondé SOLO en JSON válido:
         return None
 
 
+def analizar_oportunidad_rf(
+    instrumento: dict,
+    carry: dict,
+    perfil: dict,
+    posiciones_activas: list[dict],
+) -> dict | None:
+    """
+    Consulta a Claude sobre una oportunidad de RF en la zona gris (carry 0-2%).
+    Solo se llama cuando el análisis cuantitativo no es concluyente.
+
+    instrumento: datos del instrumento (tipo, nombre, tna_actual, etc.)
+    carry: resultado de analizar_carry_trade
+    perfil: perfil de inversión del usuario
+    posiciones_activas: posiciones RF actualmente abiertas
+
+    Returns: {accion, razon, confianza} o None si falla
+    """
+    _perfil_desc = {
+        "conservador": "prefiere preservar capital, baja tolerancia al riesgo cambiario",
+        "moderado": "acepta algo de riesgo, busca rendimiento razonable",
+        "arriesgado": "busca maximizar retorno, acepta volatilidad cambiaria",
+    }.get(perfil.get("perfil", "moderado"), "moderado")
+
+    capital_usd = perfil.get("capital_usd") or "no especificado"
+    asignacion_rf_pct = perfil.get("asignacion_rf_pct") or 30
+    total_ars_rf = sum(p.get("monto_ars", 0) for p in posiciones_activas)
+    n_posiciones = len(posiciones_activas)
+
+    prompt = f"""Sos un asesor financiero en Argentina. Evaluá si conviene entrar a este instrumento de renta fija.
+
+CONTEXTO CARRY TRADE:
+- TNA mensual del instrumento: {carry['tna_mensual']}%
+- Devaluación mensual reciente del MEP: {carry['devaluacion_mensual']}%
+- Carry neto: {carry['carry_mensual']}% (zona gris — no concluyente automáticamente)
+
+INSTRUMENTO:
+- Nombre: {instrumento.get('nombre')}
+- Tipo: {instrumento.get('tipo')}
+- TNA actual: {instrumento.get('tna_actual')}%
+- Moneda: {instrumento.get('moneda')}
+- Vencimiento: {instrumento.get('vencimiento') or 'sin fecha fija'}
+
+PERFIL DEL USUARIO:
+- Tipo: {perfil.get('perfil', 'moderado')} — {_perfil_desc}
+- Capital total en USD: {capital_usd}
+- Objetivo de allocación RF: {asignacion_rf_pct}%
+- Posiciones RF activas: {n_posiciones} (ARS ${total_ars_rf:,.0f} en total)
+
+Evaluá: ¿conviene entrar, mantener o no entrar?
+Considerá: perfil de riesgo, carry en zona gris, contexto cambiario argentino, si ya tiene mucha exposición ARS.
+
+Respondé SOLO en JSON válido:
+{{"accion": "entrar" | "no_entrar" | "mantener", "razon": "<2-3 oraciones>", "confianza": <1-10>}}"""
+
+    try:
+        response = _get_client().messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=300,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return _parse_json(response.content[0].text)
+    except Exception as e:
+        logger.error(f"Error en analizar_oportunidad_rf: {e}")
+        return None
+
+
 def formatear_mensaje_telegram(activo: dict, rec: dict, recomendacion_id: int) -> tuple[str, dict]:
     emoji_accion = {"comprar": "🟢", "vender": "🔴", "mantener": "🟡"}.get(rec["accion"], "⚪")
     emoji_conf = "🔥" if rec["confianza"] >= 8 else "✅" if rec["confianza"] >= 6 else "⚠️"
