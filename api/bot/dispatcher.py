@@ -69,10 +69,13 @@ async def dispatch_message(message: dict, token: str) -> None:
 
     # ── Wizard: respuestas de texto a pasos del setup ──
     if token and not text.startswith("/"):
-        supabase = get_supabase()
-        perfil_check = supabase.table("perfiles_inversion").select("*").eq("usuario_id", user_id).limit(1).execute()
-        if await handle_wizard_text(text, user_id, chat_id, token, supabase, perfil_check):
-            return
+        try:
+            supabase = get_supabase()
+            perfil_check = supabase.table("perfiles_inversion").select("*").eq("usuario_id", user_id).limit(1).execute()
+            if await handle_wizard_text(text, user_id, chat_id, token, supabase, perfil_check):
+                return
+        except Exception:
+            pass
 
     # ── Comandos ──
     if text.startswith("/id"):
