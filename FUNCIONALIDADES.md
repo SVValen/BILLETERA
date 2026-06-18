@@ -104,13 +104,16 @@ El cron (cada ~30 min via GitHub Actions) calcula RSI y EMA sobre los últimos p
 - Se envía por Telegram con botones ✅ Aceptar / ❌ Rechazar
 - No genera spam: si ya hay una recomendación pendiente para ese activo, no genera otra
 
-### Comandos de inversiones (RV)
+### Comandos de inversiones
 
 | Comando | Descripción |
 |---|---|
-| `/inversiones` | Resumen del perfil + recomendaciones pendientes |
-| `/portafolio` | Distribución de activos, precios actuales, P&L estimado |
+| `/inversiones` | Resumen del perfil + recomendaciones RV + carry trade actual |
+| `/portafolio` | Distribución de activos RV, precios actuales, P&L estimado |
 | `/precios` | Cotizaciones en tiempo real de tus activos + BTC/dólar |
+| `/liquidez` | Estado detallado de RF, carry trade, posiciones abiertas |
+| `/opciones_rf` | Análisis de instrumentos RF disponibles (cauciones, letras, bonos) |
+| `/plan_renta` | **Asistente inteligente**: capital → objetivo → broker → planes sugeridos → instrucciones |
 | `/como_funciona` | Explicación del algoritmo RSI/EMA/carry trade |
 
 ---

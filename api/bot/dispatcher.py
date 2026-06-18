@@ -10,7 +10,8 @@ from .handlers.wizard_inversion import handle_wizard_callback, handle_wizard_tex
 from .handlers.posiciones_rf import handle_rf_callback, _parse_posicion_rf, _handle_nueva_posicion_rf
 from .handlers.movimientos import _process_text
 from .handlers.presupuestos import _handle_presupuesto_cmd
-from .handlers.comandos_inversion import _handle_inversiones_cmd, _handle_precios_cmd, _handle_liquidez_cmd, _handle_portafolio_cmd
+from .handlers.comandos_inversion import _handle_inversiones_cmd, _handle_precios_cmd, _handle_liquidez_cmd, _handle_portafolio_cmd, _handle_opciones_rf_cmd
+from .handlers.plan_renta import handle_plan_renta_text, handle_plan_renta_callback, _ask_capital_plan
 from .middleware_portafolio import resolver_portafolio, handle_psel_callback
 
 
@@ -26,6 +27,8 @@ async def dispatch_callback(cq: dict, token: str) -> None:
     if await handle_movimiento_callback(parts, callback_id, chat_id, message_id, user_id, supabase, token):
         return
     if await handle_wizard_callback(parts, callback_id, chat_id, message_id, user_id, supabase, token):
+        return
+    if await handle_plan_renta_callback(parts, callback_id, chat_id, user_id, token):
         return
     if await handle_recomendacion_callback(parts, callback_id, chat_id, message_id, user_id, supabase, token):
         return
@@ -59,6 +62,8 @@ async def dispatch_message(message: dict, token: str) -> None:
         # Si el usuario está en un paso de texto del wizard, el audio actúa como texto
         if await handle_wizard_text(transcribed, user_id, chat_id, token):
             return
+        if await handle_plan_renta_text(transcribed, user_id, chat_id, token):
+            return
         await _process_text(transcribed, user_id, chat_id, token)
         return
     else:
@@ -70,6 +75,8 @@ async def dispatch_message(message: dict, token: str) -> None:
     # ── Wizard: respuestas de texto a pasos del setup ──
     if token and not text.startswith("/"):
         if await handle_wizard_text(text, user_id, chat_id, token):
+            return
+        if await handle_plan_renta_text(text, user_id, chat_id, token):
             return
 
     # ── Comandos ──
@@ -170,6 +177,23 @@ async def dispatch_message(message: dict, token: str) -> None:
                 await _send(chat_id, "No tenés portafolios activos. Usá /portafolio_nuevo para crear uno.", token, parse_mode="")
             elif resultado != "selection_sent":
                 await _handle_liquidez_cmd(user_id, chat_id, token, portafolio=resultado)
+        return
+
+    if text.lower().startswith("/opciones_rf"):
+        if token:
+            await _handle_opciones_rf_cmd(user_id, chat_id, token)
+        return
+
+    if text.lower().startswith("/plan_renta"):
+        if token:
+            await _ask_capital_plan(chat_id, token)
+            supabase = get_supabase()
+            supabase.table("portafolios").insert({
+                "usuario_id": user_id,
+                "tipo": "plan_renta_temp",
+                "estado_wizard": "pidiendo_capital",
+                "activo": False,
+            }).execute()
         return
 
     if text.lower().startswith("/iol_debug"):

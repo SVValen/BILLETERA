@@ -5,6 +5,8 @@ from ..tg import _send
 
 async def _handle_inversiones_cmd(user_id: str, chat_id: int, token: str) -> None:
     from .wizard_inversion import _send_tipo_keyboard
+    from lib.market_data import fetch_dolar_precio
+    from lib.rf_analysis import analizar_carry_trade
     supabase = get_supabase()
 
     # Verificar si tiene portafolios activos
@@ -27,6 +29,7 @@ async def _handle_inversiones_cmd(user_id: str, chat_id: int, token: str) -> Non
         rf = port.get("asignacion_rf_pct") or 0
         lines.append(f"{emoji} *{nombre}* — ${capital:,.0f} USD | RF {rf:.0f}%")
 
+    # ─── RECOMENDACIONES DE RENTA VARIABLE ───
     recs_r = (
         supabase.table("recomendaciones")
         .select("*, activos(codigo, nombre)")
@@ -37,13 +40,39 @@ async def _handle_inversiones_cmd(user_id: str, chat_id: int, token: str) -> Non
         .execute()
     )
     if recs_r.data:
-        lines.append(f"\n⏳ *{len(recs_r.data)} recomendación(es) pendiente(s):*")
+        lines.append(f"\n⏳ *{len(recs_r.data)} recomendación(es) RV pendiente(s):*")
         for r in recs_r.data:
             a = r.get("activos") or {}
             icon = "🟢" if r["accion"] == "comprar" else "🔴"
             lines.append(f"{icon} {r['accion'].upper()} {a.get('codigo', '?')} — confianza {r['confianza']}/10")
     else:
-        lines.append("\n✅ Sin señales ahora. El cron revisa cada 30 minutos.")
+        lines.append("\n✅ Sin señales RV ahora. El cron revisa cada 30 minutos.")
+
+    # ─── ANÁLISIS DE RENTA FIJA (Carry Trade) ───
+    dolar_data = await fetch_dolar_precio("bolsa")
+    dolar_mep = dolar_data["precio"] if dolar_data else None
+    
+    if dolar_mep:
+        caucion_r = supabase.table("instrumentos_rf").select("tna_actual").eq("codigo", "CAUCION_7D").limit(1).execute()
+        tna_ref = caucion_r.data[0]["tna_actual"] if caucion_r.data and caucion_r.data[0].get("tna_actual") else None
+        
+        if tna_ref:
+            carry = analizar_carry_trade(tna_ref, dolar_mep, None)
+            icon = "🟢" if carry["accion"] == "entrar" else "🔴" if carry["accion"] == "salir" else "🟡"
+            lines.append(
+                f"\n{icon} *Carry Trade RF*\n"
+                f"  Caución 7D: {tna_ref:.1f}% TNA ({carry['tna_mensual']:.1f}%/mes)\n"
+                f"  Carry neto: {carry['carry_mensual']:+.1f}% — {carry['accion'].upper()}\n"
+                f"  Dólar MEP: ${dolar_mep:,.2f} ARS"
+            )
+
+            # Sugerir opciones RF según carry trade
+            lines.append(f"\n💡 *Opciones RF disponibles:*")
+            if carry["accion"] == "entrar":
+                lines.append("  • Caución 7D — renovable, máxima liquidez")
+                lines.append("  • Lecaps — con plazo, rentabilidad creciente")
+            else:
+                lines.append("  • AL30, GD30 — en USD, protección contra devaluación")
 
     stats_r = supabase.table("decisiones_inversion").select("resultado, accion").eq("usuario_id", user_id).execute()
     decisiones = stats_r.data or []
@@ -51,9 +80,9 @@ async def _handle_inversiones_cmd(user_id: str, chat_id: int, token: str) -> Non
     exitosas = [d for d in aceptadas if d.get("resultado") == "exitoso"]
     if aceptadas:
         winrate = round(len(exitosas) / len(aceptadas) * 100)
-        lines.append(f"\n🎯 Winrate: {winrate}% ({len(exitosas)}/{len(aceptadas)})")
+        lines.append(f"\n🎯 Winrate RV: {winrate}% ({len(exitosas)}/{len(aceptadas)})")
 
-    lines.append("\n_/portafolio — distribución | /liquidez — RF | /precios — cotizaciones_")
+    lines.append("\n_/portafolio — distribución | /liquidez — detalle RF | /precios — cotizaciones_")
     await _send(chat_id, "\n".join(lines), token)
 
 
@@ -242,4 +271,79 @@ async def _handle_portafolio_cmd(user_id: str, chat_id: int, token: str, portafo
         lines.append("_Sin activos RV asignados todavía._\n")
 
     lines.append("_Precios actualizados por el cron cada 30 min_")
+    await _send(chat_id, "\n".join(lines), token)
+
+
+async def _handle_opciones_rf_cmd(user_id: str, chat_id: int, token: str) -> None:
+    """Muestra análisis de opciones de RF disponibles y carry trade actual."""
+    from lib.market_data import fetch_dolar_precio
+    from lib.rf_analysis import analizar_carry_trade
+    supabase = get_supabase()
+
+    lines = ["💰 *Opciones de Renta Fija*\n"]
+
+    # ─── Obtener dólar y carry trade ───
+    dolar_data = await fetch_dolar_precio("bolsa")
+    dolar_mep = dolar_data["precio"] if dolar_data else None
+
+    if not dolar_mep:
+        await _send(chat_id, "No se pudo obtener cotización. Intentá de nuevo.", token)
+        return
+
+    # ─── Carry trade actual ───
+    caucion_r = supabase.table("instrumentos_rf").select("tna_actual").eq("codigo", "CAUCION_7D").limit(1).execute()
+    tna_ref = caucion_r.data[0]["tna_actual"] if caucion_r.data and caucion_r.data[0].get("tna_actual") else None
+
+    if tna_ref:
+        carry = analizar_carry_trade(tna_ref, dolar_mep, None)
+        icon = "🟢" if carry["accion"] == "entrar" else "🔴" if carry["accion"] == "salir" else "🟡"
+        lines.append(
+            f"{icon} *Carry Trade*\n"
+            f"  Acción: {carry['accion'].upper()}\n"
+            f"  Caución 7D: {tna_ref:.1f}% TNA\n"
+            f"  Carry mensual: {carry['carry_mensual']:+.1f}%\n"
+            f"  Dólar MEP: ${dolar_mep:,.2f} ARS\n"
+        )
+
+    # ─── Instrumentos disponibles ───
+    lines.append("*📄 Instrumentos disponibles:*\n")
+
+    # Cauciones
+    caucion_opts = supabase.table("instrumentos_rf").select("codigo, nombre, plazo_dias, tna_actual").eq("tipo", "caucion").eq("activo", True).order("plazo_dias").execute()
+    if caucion_opts.data:
+        lines.append("*🔄 Cauciones (Liquidez máxima)*")
+        for c in caucion_opts.data:
+            tna = c.get("tna_actual") or "—"
+            if isinstance(tna, (int, float)):
+                tna = f"{tna:.1f}%"
+            lines.append(f"  • {c['nombre']}: {tna} TNA — renovable")
+        lines.append("")
+
+    # Letras (Lecaps)
+    lecap_opts = supabase.table("instrumentos_rf").select("codigo, nombre, plazo_dias, tna_actual, vencimiento").eq("tipo", "letra").eq("activo", True).limit(3).execute()
+    if lecap_opts.data:
+        lines.append("*📋 Letras del Tesoro (Lecaps)*")
+        for l in lecap_opts.data:
+            tna = l.get("tna_actual") or "—"
+            if isinstance(tna, (int, float)):
+                tna = f"{tna:.1f}%"
+            venc = l.get("vencimiento", "")
+            plazo = l.get("plazo_dias", "")
+            venc_txt = f" vence {venc}" if venc else f" {plazo}d"
+            lines.append(f"  • {l['nombre']}: {tna} TNA •{venc_txt}")
+        lines.append("")
+
+    # Bonos soberanos
+    bono_opts = supabase.table("instrumentos_rf").select("codigo, nombre, moneda, tna_actual").eq("tipo", "bono_soberano").eq("activo", True).limit(4).execute()
+    if bono_opts.data:
+        lines.append("*🪙 Bonos Soberanos (USD)*")
+        for b in bono_opts.data:
+            tir = b.get("tna_actual") or "—"
+            if isinstance(tir, (int, float)):
+                tir = f"{tir:.1f}%"
+            lines.append(f"  • {b['codigo']} ({b['nombre']}): {tir} TIR")
+        lines.append("")
+
+    lines.append("*Para registrar una posición:*\n`puse 500000 en caución 7 días`\n`lecap 300000 S28F6`\n`AL30 100000`\n")
+    lines.append("_Ver estado con /liquidez — Ver recomendaciones con /inversiones_")
     await _send(chat_id, "\n".join(lines), token)
