@@ -1,3 +1,4 @@
+import re
 from datetime import date
 from lib.supabase_client import get_supabase
 from lib.parser import categorize_from_keywords
@@ -204,6 +205,74 @@ async def handle_movimiento_callback(
             await _answer_callback(callback_id, token)
             desc = row.data["descripcion"] if row.data else "?"
             await _edit_message(chat_id, message_id, f"🗑️ *{desc}* eliminado.", token)
+
+            # Si era una cuota, ofrecer cancelar las restantes
+            if row.data:
+                m = re.search(r"^(.+?)\s*\(cuota \d+/(\d+)\)$", row.data["descripcion"])
+                if m:
+                    base, total = m.group(1), int(m.group(2))
+                    resto_r = (
+                        supabase.table("movimientos")
+                        .select("id")
+                        .eq("usuario_id", user_id)
+                        .neq("estado", "anulado")
+                        .like("descripcion", f"{base} (cuota %/{total})")
+                        .execute()
+                    )
+                    if resto_r.data:
+                        count = len(resto_r.data)
+                        anchor_id = resto_r.data[0]["id"]
+                        await _send(
+                            chat_id,
+                            f"¿Cancelar también las {count} cuota(s) restantes de *{base}*?",
+                            token,
+                            reply_markup={"inline_keyboard": [[
+                                {"text": f"🗑️ Sí, cancelar {count} más", "callback_data": f"del_cuotas_resto:{anchor_id}"},
+                                {"text": "✗ No", "callback_data": "del_cuotas_no"},
+                            ]]},
+                        )
+        return True
+
+    if parts[0] == "del_cuotas_resto" and len(parts) == 2:
+        anchor_id = int(parts[1])
+        anchor = supabase.table("movimientos").select("descripcion").eq("id", anchor_id).eq("usuario_id", user_id).single().execute()
+        if anchor.data:
+            m = re.search(r"^(.+?)\s*\(cuota \d+/(\d+)\)$", anchor.data["descripcion"])
+            if m:
+                base, total = m.group(1), int(m.group(2))
+                resto_r = (
+                    supabase.table("movimientos")
+                    .select("id")
+                    .eq("usuario_id", user_id)
+                    .neq("estado", "anulado")
+                    .like("descripcion", f"{base} (cuota %/{total})")
+                    .execute()
+                )
+                for r in (resto_r.data or []):
+                    supabase.table("movimientos").update({"estado": "anulado"}).eq("id", r["id"]).execute()
+                count = len(resto_r.data or [])
+                # Desactivar el plan si lo encontramos por descripción
+                plan_r = (
+                    supabase.table("cuotas_plan")
+                    .select("id")
+                    .eq("usuario_id", user_id)
+                    .eq("descripcion", base)
+                    .eq("num_cuotas", total)
+                    .eq("activo", True)
+                    .limit(1)
+                    .execute()
+                )
+                if plan_r.data:
+                    supabase.table("cuotas_plan").update({"activo": False}).eq("id", plan_r.data[0]["id"]).execute()
+        if token:
+            await _answer_callback(callback_id, token)
+            await _edit_message(chat_id, message_id, f"🗑️ Plan cancelado — {count} cuota(s) eliminadas.", token)
+        return True
+
+    if parts[0] == "del_cuotas_no":
+        if token:
+            await _answer_callback(callback_id, token)
+            await _edit_message(chat_id, message_id, "✕ Solo esa cuota fue eliminada.", token)
         return True
 
     if parts[0] == "del_no" and len(parts) == 2:
