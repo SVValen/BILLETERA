@@ -17,6 +17,7 @@ async def handle_recomendacion_callback(
             }).eq("id", rec_id).execute()
             supabase.table("decisiones_inversion").insert({
                 "usuario_id": user_id,
+                "portafolio_id": rec["portafolio_id"],
                 "recomendacion_id": rec_id,
                 "accion": "aceptada",
                 "precio_entrada": rec.get("precio_recomendacion"),
@@ -29,7 +30,7 @@ async def handle_recomendacion_callback(
 
     if parts[0] == "inv_no" and len(parts) == 2:
         rec_id = int(parts[1])
-        rec_r = supabase.table("recomendaciones").select("id, estado").eq("id", rec_id).eq("usuario_id", user_id).limit(1).execute()
+        rec_r = supabase.table("recomendaciones").select("id, estado, portafolio_id").eq("id", rec_id).eq("usuario_id", user_id).limit(1).execute()
         rec = rec_r.data[0] if rec_r.data else None
         if rec and rec["estado"] == "pendiente":
             supabase.table("recomendaciones").update({
@@ -37,6 +38,7 @@ async def handle_recomendacion_callback(
             }).eq("id", rec_id).execute()
             supabase.table("decisiones_inversion").insert({
                 "usuario_id": user_id,
+                "portafolio_id": rec["portafolio_id"],
                 "recomendacion_id": rec_id,
                 "accion": "rechazada",
             }).execute()

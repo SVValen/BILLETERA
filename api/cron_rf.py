@@ -245,20 +245,29 @@ async def cron_rf(request: Request):
     except Exception:
         pass  # Sin dato histórico: rf_analysis usa devaluación conservadora por defecto
 
-    # 3. Procesar cada usuario con capital_usd configurado
-    perfiles_r = (
-        supabase.table("perfiles_inversion")
+    # 3. Procesar cada usuario con capital_usd configurado (un mensaje por usuario, no por portafolio)
+    portafolios_r = (
+        supabase.table("portafolios")
         .select("*")
-        .eq("estado", "activo")
+        .eq("activo", True)
+        .eq("estado_wizard", "activo")
         .not_.is_("capital_usd", "null")
         .execute()
     )
-    perfiles = perfiles_r.data or []
+    portafolios = portafolios_r.data or []
+
+    # Agrupar portafolios por usuario → usar el de mayor capital como referencia
+    usuarios_portafolio: dict[str, dict] = {}
+    for p in portafolios:
+        uid = str(p["usuario_id"])
+        if uid not in usuarios_portafolio or (p.get("capital_usd") or 0) > (usuarios_portafolio[uid].get("capital_usd") or 0):
+            usuarios_portafolio[uid] = p
 
     alertas_enviadas = 0
-    for perfil in perfiles:
-        usuario_id = perfil["usuario_id"]
+    usuarios_procesados = 0
+    for usuario_id, perfil in usuarios_portafolio.items():
         mensajes = await _procesar_usuario(usuario_id, perfil, supabase, dolar_mep, dolar_mep_30d, instrumentos)
+        usuarios_procesados += 1
         for msg in mensajes:
             ok = await _send_telegram(usuario_id, msg)
             if ok:
@@ -267,7 +276,7 @@ async def cron_rf(request: Request):
     return JSONResponse({
         "ok": True,
         "instrumentos_actualizados": instrumentos_actualizados,
-        "usuarios_procesados": len(perfiles),
+        "usuarios_procesados": usuarios_procesados,
         "alertas_enviadas": alertas_enviadas,
         "dolar_mep": dolar_mep,
     })

@@ -140,22 +140,56 @@ async def cron_inversiones(request: Request):
         if actualizado:
             activos_actualizados[activo["id"]] = actualizado
 
-    # 2. Para cada usuario con perfil activo, evaluar señales solo en sus activos
-    perfiles_r = supabase.table("perfiles_inversion").select("*").eq("estado", "activo").execute()
-    perfiles = perfiles_r.data or []
+    # 2. Para cada portafolio activo, evaluar señales solo en sus activos
+    _TIPO_A_PERFIL = {
+        "conservador": "conservador",
+        "pasivo": "moderado",
+        "crecimiento": "moderado",
+        "oportunista": "arriesgado",
+    }
+
+    portafolios_r = (
+        supabase.table("portafolios")
+        .select("*")
+        .eq("activo", True)
+        .eq("estado_wizard", "activo")
+        .execute()
+    )
+    portafolios = portafolios_r.data or []
 
     recomendaciones_generadas = 0
+    # Evitar duplicados si el mismo activo está en múltiples portafolios del mismo usuario
+    recomendaciones_enviadas: set[tuple] = set()
 
-    for perfil in perfiles:
-        usuario_id = perfil["usuario_id"]
+    for portafolio in portafolios:
+        usuario_id = portafolio["usuario_id"]
         winrate = await _calcular_winrate(usuario_id, supabase)
 
-        # Activos que el usuario seleccionó monitorear
-        ua_r = supabase.table("usuario_activos").select("activo_id").eq("usuario_id", usuario_id).execute()
-        activos_usuario = {row["activo_id"] for row in (ua_r.data or [])}
+        # Activos del portafolio
+        pa_r = (
+            supabase.table("portafolio_activos")
+            .select("activo_id")
+            .eq("portafolio_id", portafolio["id"])
+            .execute()
+        )
+        activos_portafolio = {row["activo_id"] for row in (pa_r.data or [])}
+
+        # Compatibilidad con generar_recomendacion (espera campos del viejo perfil)
+        perfil_compat = {
+            "usuario_id": usuario_id,
+            "perfil": _TIPO_A_PERFIL.get(portafolio["tipo"], "moderado"),
+            "objetivo": portafolio.get("objetivo"),
+            "plazo": portafolio.get("plazo"),
+            "capital_usd": portafolio.get("capital_usd"),
+            "asignacion_rf_pct": portafolio.get("asignacion_rf_pct"),
+        }
 
         for activo_id, activo in activos_actualizados.items():
-            if activo_id not in activos_usuario:
+            if activo_id not in activos_portafolio:
+                continue
+
+            # Saltar si ya enviamos recomendación para este par usuario/activo en esta ejecución
+            if (usuario_id, activo_id) in recomendaciones_enviadas:
                 continue
 
             rsi = activo.get("rsi")
@@ -169,7 +203,7 @@ async def cron_inversiones(request: Request):
 
             interp = interpretar_rsi(rsi)
             rec = generar_recomendacion(
-                perfil=perfil,
+                perfil=perfil_compat,
                 activo=activo,
                 rsi=rsi,
                 ema_20=activo.get("ema_20"),
@@ -184,6 +218,7 @@ async def cron_inversiones(request: Request):
             # Guardar recomendación en BD
             rec_insert = supabase.table("recomendaciones").insert({
                 "usuario_id": usuario_id,
+                "portafolio_id": portafolio["id"],
                 "activo_id": activo_id,
                 "accion": rec["accion"],
                 "razon": rec["razon"],
@@ -197,6 +232,7 @@ async def cron_inversiones(request: Request):
                 continue
 
             rec_id = rec_insert.data[0]["id"]
+            recomendaciones_enviadas.add((usuario_id, activo_id))
 
             # Enviar por Telegram
             texto, reply_markup = formatear_mensaje_telegram(activo, rec, rec_id)
