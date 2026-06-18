@@ -168,7 +168,7 @@ export default function LiquidezTab() {
                     <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                   ))}
                 </Pie>
-                <Tooltip formatter={(value: number | undefined) => value !== undefined ? `$${(value/1000).toFixed(0)}k` : ''} />
+                <Tooltip formatter={(value) => value !== undefined ? `$${(Number(value)/1000).toFixed(0)}k` : ''} />
               </PieChart>
             </ResponsiveContainer>
           </div>
@@ -183,7 +183,7 @@ export default function LiquidezTab() {
                 <CartesianGrid strokeDasharray="3 3" vertical={false} />
                 <XAxis dataKey="fecha" tick={{ fontSize: 11 }} />
                 <YAxis tick={{ fontSize: 11 }} />
-                <Tooltip formatter={(value: number | undefined) => value !== undefined ? `$${value.toFixed(2)} USD` : ''} />
+                <Tooltip formatter={(value) => value !== undefined ? `$${Number(value).toFixed(2)} USD` : ''} />
                 <Line type="monotone" dataKey="rendimiento_usd" stroke="#22c55e" dot={{ r: 3 }} />
               </LineChart>
             </ResponsiveContainer>
