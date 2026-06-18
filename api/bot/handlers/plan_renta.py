@@ -112,7 +112,7 @@ async def _generar_planes(
     # Guardar estado en cache (preferentemente en BD con estado temporal)
     supabase.table("portafolios").insert({
         "usuario_id": user_id,
-        "tipo": "plan_renta_temp",
+        "tipo": "conservador",
         "estado_wizard": "eligiendo_plan",
         "capital_usd": capital_usd,
         "objetivo": f"Renta {objetivo_renta_usd} USD/mes" if objetivo_renta_usd else "Máxima",
@@ -126,13 +126,14 @@ async def handle_plan_renta_text(text: str, user_id: str, chat_id: int, token: s
     """Procesa texto en el flujo de /plan_renta."""
     supabase = get_supabase()
 
-    # Buscar si hay un plan_renta en progreso
+    # Buscar si hay un plan_renta en progreso (identificado por estado_wizard)
+    _PLAN_RENTA_ESTADOS = ("pidiendo_capital", "pidiendo_objetivo", "pidiendo_broker", "eligiendo_plan", "instrucciones_enviadas")
     result = (
         supabase.table("portafolios")
         .select("*")
         .eq("usuario_id", user_id)
-        .eq("tipo", "plan_renta_temp")
         .eq("activo", False)
+        .in_("estado_wizard", list(_PLAN_RENTA_ESTADOS))
         .order("id", desc=True)
         .limit(1)
         .execute()
@@ -246,12 +247,13 @@ async def handle_plan_renta_callback(parts: list[str], callback_id: str, chat_id
     broker = parts[1] if len(parts) > 1 else "otro"
 
     # Obtener plan en progreso
+    _PLAN_RENTA_ESTADOS = ("pidiendo_capital", "pidiendo_objetivo", "pidiendo_broker", "eligiendo_plan", "instrucciones_enviadas")
     result = (
         supabase.table("portafolios")
         .select("*")
         .eq("usuario_id", user_id)
-        .eq("tipo", "plan_renta_temp")
         .eq("activo", False)
+        .in_("estado_wizard", list(_PLAN_RENTA_ESTADOS))
         .order("id", desc=True)
         .limit(1)
         .execute()

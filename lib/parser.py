@@ -1,5 +1,54 @@
 import re
 
+# ── Detección de aportes a portafolios ────────────────────────────────────────
+
+_APORTE_RE = re.compile(
+    r"(?:sumé|sume|sumo|agrego|agregué|agregue|deposité|deposite|añadí|añadi|cargué|cargue)"
+    r"\s+\$?([\d.,]+)"
+    r"(?:\s+(USD|u\$s|usd|dólares?|dolares?|ARS|pesos?))?"
+    r"(?:\s+(?:al?|a\s+(?:mi\s+)?|en(?:\s+(?:el?\s+)?|(?:\s+mi\s+)?))\s*(.+))?",
+    re.IGNORECASE,
+)
+_MONEDA_USD_RE = re.compile(r"USD|u\$s|usd|dólares?|dolares?", re.IGNORECASE)
+_MONEDA_ARS_RE = re.compile(r"ARS|pesos?", re.IGNORECASE)
+
+
+def parse_aporte(text: str) -> dict | None:
+    """
+    Detecta aportes de capital a portafolios.
+    Retorna {"monto": float, "moneda": "USD"|"ARS", "hint": str|None} o None.
+
+    Ejemplos:
+      "sumé 500 USD"                     → monto=500, moneda=USD
+      "agregué 200000 pesos al conservador" → monto=200000, moneda=ARS, hint="conservador"
+      "deposité 1000 a mi portafolio"    → monto=1000, moneda=USD (heurística)
+    """
+    m = _APORTE_RE.search(text.strip())
+    if not m:
+        return None
+
+    monto_raw = m.group(1).replace(".", "").replace(",", ".")
+    try:
+        monto = float(monto_raw)
+    except ValueError:
+        return None
+    if monto <= 0:
+        return None
+
+    moneda_str = m.group(2) or ""
+    if _MONEDA_ARS_RE.match(moneda_str):
+        moneda = "ARS"
+    elif _MONEDA_USD_RE.match(moneda_str):
+        moneda = "USD"
+    else:
+        # Sin moneda explícita: heurística por magnitud
+        moneda = "ARS" if monto >= 50_000 else "USD"
+
+    hint = (m.group(3) or "").strip().lower() or None
+
+    return {"monto": monto, "moneda": moneda, "hint": hint}
+
+
 # ── Detección de gastos recurrentes y cuotas ─────────────────────────────────
 
 def parse_recurrente(text: str) -> int | None:

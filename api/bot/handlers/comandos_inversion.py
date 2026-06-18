@@ -344,6 +344,29 @@ async def _handle_opciones_rf_cmd(user_id: str, chat_id: int, token: str) -> Non
             lines.append(f"  • {b['codigo']} ({b['nombre']}): {tir} TIR")
         lines.append("")
 
-    lines.append("*Para registrar una posición:*\n`puse 500000 en caución 7 días`\n`lecap 300000 S28F6`\n`AL30 100000`\n")
     lines.append("_Ver estado con /liquidez — Ver recomendaciones con /inversiones_")
-    await _send(chat_id, "\n".join(lines), token)
+
+    # Botones de acceso rápido para registrar cada instrumento disponible
+    todos_insts = (
+        supabase.table("instrumentos_rf")
+        .select("id, nombre, codigo, tipo")
+        .eq("activo", True)
+        .order("tipo")
+        .limit(8)
+        .execute()
+    )
+    _EMOJI_TIPO = {"caucion": "🔄", "letra": "📋", "bono_soberano": "🪙", "on": "🏢"}
+    buttons = []
+    fila: list = []
+    for inst in (todos_insts.data or []):
+        nombre_corto = inst.get("codigo") or inst.get("nombre", "?")
+        emoji = _EMOJI_TIPO.get(inst.get("tipo", ""), "📄")
+        fila.append({"text": f"{emoji} {nombre_corto}", "callback_data": f"rf_elegir:{inst['id']}"})
+        if len(fila) == 2:
+            buttons.append(fila)
+            fila = []
+    if fila:
+        buttons.append(fila)
+
+    reply_markup = {"inline_keyboard": buttons} if buttons else None
+    await _send(chat_id, "\n".join(lines), token, reply_markup=reply_markup)

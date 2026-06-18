@@ -3,6 +3,7 @@ import json as _json
 import urllib.parse
 from datetime import date
 from lib.supabase_client import get_supabase
+from lib.market_data import fetch_dolar_precio
 from ..tg import _send, _answer_callback, _edit_message, _get_dolar_oficial
 
 
@@ -105,7 +106,7 @@ async def _handle_nueva_posicion_rf(datos: dict, user_id: str, chat_id: int, tok
         "portafolio_id": portafolio_id,
         "instrumento_id": instrumento["id"],
         "monto_ars": monto_ars,
-        "monto_usd": monto_usd_entrada,
+        "monto_usd_entrada": monto_usd_entrada,
         "tna_contratada": tna,
         "fecha_vencimiento": instrumento.get("fecha_vencimiento"),
     }
@@ -137,7 +138,7 @@ async def handle_rf_callback(
                 "portafolio_id": datos["portafolio_id"],
                 "instrumento_id": datos["instrumento_id"],
                 "monto_ars": datos["monto_ars"],
-                "monto_usd": datos["monto_usd"],
+                "monto_usd_entrada": datos["monto_usd_entrada"],
                 "tna_contratada": datos.get("tna_contratada"),
                 "fecha_vencimiento": datos.get("fecha_vencimiento"),
             }).execute()
@@ -155,6 +156,121 @@ async def handle_rf_callback(
         if token:
             await _answer_callback(callback_id, token)
             await _edit_message(chat_id, message_id, "Registro cancelado.", token)
+        return True
+
+    if parts[0] == "rf_elegir" and len(parts) == 2:
+        instrumento_id = int(parts[1])
+        inst_r = supabase.table("instrumentos_rf").select("*").eq("id", instrumento_id).limit(1).execute()
+        if not inst_r.data:
+            await _answer_callback(callback_id, token)
+            return True
+        instrumento = inst_r.data[0]
+
+        ports = (
+            supabase.table("portafolios")
+            .select("id, capital_usd, asignacion_rf_pct, nombre_personalizado, nombre_sugerido")
+            .eq("usuario_id", user_id)
+            .eq("activo", True)
+            .eq("estado_wizard", "activo")
+            .order("asignacion_rf_pct", desc=True)
+            .limit(1)
+            .execute()
+        )
+        if not ports.data:
+            await _answer_callback(callback_id, token)
+            await _send(chat_id, "No tenés portafolios activos. Creá uno con /portafolio_nuevo.", token, parse_mode="")
+            return True
+        portafolio = ports.data[0]
+
+        dolar_data = await fetch_dolar_precio("bolsa")
+        dolar_mep = dolar_data["precio"] if dolar_data else 1200
+
+        capital_usd = portafolio.get("capital_usd") or 0
+        rf_pct = portafolio.get("asignacion_rf_pct") or 30
+        capital_rf_ars = capital_usd * rf_pct / 100 * dolar_mep
+
+        nombre_inst = instrumento.get("nombre") or instrumento.get("codigo")
+        tna = instrumento.get("tna_actual")
+        tna_txt = f" · {tna:.1f}% TNA" if tna else ""
+
+        porcentajes = [(25, 0.25), (50, 0.50), (75, 0.75), (100, 1.0)]
+        buttons = [
+            [{"text": f"{pct}% — ${capital_rf_ars * frac:,.0f} ARS",
+              "callback_data": f"rf_monto:{instrumento_id}:{int(capital_rf_ars * frac)}"}]
+            for pct, frac in porcentajes
+            if int(capital_rf_ars * frac) > 0
+        ]
+
+        await _answer_callback(callback_id, token)
+        await _send(
+            chat_id,
+            f"💰 *{nombre_inst}*{tna_txt}\n\n"
+            f"¿Cuánto ARS querés asignar?\n"
+            f"_(Capital RF disponible: ${capital_rf_ars:,.0f} ARS · MEP ${dolar_mep:,.0f})_",
+            token,
+            reply_markup={"inline_keyboard": buttons},
+        )
+        return True
+
+    if parts[0] == "rf_monto" and len(parts) == 3:
+        instrumento_id = int(parts[1])
+        monto_ars = float(parts[2])
+
+        inst_r = supabase.table("instrumentos_rf").select("*").eq("id", instrumento_id).limit(1).execute()
+        if not inst_r.data:
+            await _answer_callback(callback_id, token)
+            return True
+        instrumento = inst_r.data[0]
+
+        ports = (
+            supabase.table("portafolios")
+            .select("id, capital_usd, asignacion_rf_pct, nombre_personalizado, nombre_sugerido")
+            .eq("usuario_id", user_id)
+            .eq("activo", True)
+            .eq("estado_wizard", "activo")
+            .order("asignacion_rf_pct", desc=True)
+            .limit(1)
+            .execute()
+        )
+        portafolio = ports.data[0] if ports.data else {}
+        portafolio_id = portafolio.get("id")
+
+        dolar_data = await fetch_dolar_precio("bolsa")
+        dolar_mep = dolar_data["precio"] if dolar_data else None
+        if not dolar_mep:
+            await _answer_callback(callback_id, token, text="No pude obtener tipo de cambio")
+            return True
+
+        monto_usd_entrada = round(monto_ars / dolar_mep, 2)
+        tna = instrumento.get("tna_actual")
+        nombre = instrumento.get("nombre") or instrumento.get("codigo")
+        tna_txt = f" @ {tna:.1f}% TNA" if tna else ""
+        port_nombre = portafolio.get("nombre_personalizado") or portafolio.get("nombre_sugerido") or "Portafolio"
+
+        payload = {
+            "portafolio_id": portafolio_id,
+            "instrumento_id": instrumento_id,
+            "monto_ars": monto_ars,
+            "monto_usd_entrada": monto_usd_entrada,
+            "tna_contratada": tna,
+            "fecha_vencimiento": instrumento.get("fecha_vencimiento"),
+        }
+        payload_enc = urllib.parse.quote(_json.dumps(payload))
+
+        await _answer_callback(callback_id, token)
+        await _send(
+            chat_id,
+            f"📄 *Confirmar posición RF*\n\n"
+            f"Instrumento: *{nombre}*{tna_txt}\n"
+            f"Monto: ${monto_ars:,.0f} ARS (≈${monto_usd_entrada:,.0f} USD)\n"
+            f"Portafolio: {port_nombre}\n\n"
+            f"¿Registrar esta posición?",
+            token,
+            reply_markup={"inline_keyboard": [[
+                {"text": "✅ Confirmar", "callback_data": f"rf_confirmar:{payload_enc}"},
+                {"text": "❌ Cancelar", "callback_data": "rf_cancelar"},
+            ]]},
+        )
         return True
 
     if parts[0] == "rf_rescatar" and len(parts) == 2:

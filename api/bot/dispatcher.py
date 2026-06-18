@@ -12,6 +12,9 @@ from .handlers.movimientos import _process_text
 from .handlers.presupuestos import _handle_presupuesto_cmd
 from .handlers.comandos_inversion import _handle_inversiones_cmd, _handle_precios_cmd, _handle_liquidez_cmd, _handle_portafolio_cmd, _handle_opciones_rf_cmd
 from .handlers.plan_renta import handle_plan_renta_text, handle_plan_renta_callback, _ask_capital_plan
+from .handlers.aportes import handle_aporte, handle_aporte_callback
+from .handlers.activos_rv import handle_rv_callback, handle_activos_cmd
+from lib.parser import parse_aporte
 from .middleware_portafolio import resolver_portafolio, handle_psel_callback
 
 
@@ -33,6 +36,10 @@ async def dispatch_callback(cq: dict, token: str) -> None:
     if await handle_recomendacion_callback(parts, callback_id, chat_id, message_id, user_id, supabase, token):
         return
     if await handle_rf_callback(parts, callback_id, chat_id, message_id, user_id, supabase, token):
+        return
+    if await handle_aporte_callback(parts, callback_id, chat_id, message_id, user_id, token):
+        return
+    if await handle_rv_callback(parts, callback_id, chat_id, message_id, user_id, supabase, token):
         return
     if await handle_psel_callback(parts, callback_id, chat_id, message_id, user_id, token):
         return
@@ -64,6 +71,10 @@ async def dispatch_message(message: dict, token: str) -> None:
             return
         if await handle_plan_renta_text(transcribed, user_id, chat_id, token):
             return
+        aporte_parsed = parse_aporte(transcribed)
+        if aporte_parsed:
+            await handle_aporte(aporte_parsed, user_id, chat_id, token)
+            return
         await _process_text(transcribed, user_id, chat_id, token)
         return
     else:
@@ -77,6 +88,10 @@ async def dispatch_message(message: dict, token: str) -> None:
         if await handle_wizard_text(text, user_id, chat_id, token):
             return
         if await handle_plan_renta_text(text, user_id, chat_id, token):
+            return
+        aporte_parsed = parse_aporte(text)
+        if aporte_parsed:
+            await handle_aporte(aporte_parsed, user_id, chat_id, token)
             return
 
     # ── Comandos ──
@@ -95,6 +110,11 @@ async def dispatch_message(message: dict, token: str) -> None:
     if text.lower().startswith("/portafolio_nuevo"):
         if token:
             await _send_tipo_keyboard(chat_id, token)
+        return
+
+    if text.lower().startswith("/activos"):
+        if token:
+            await handle_activos_cmd(user_id, chat_id, token)
         return
 
     if text.lower().startswith("/mis_portafolios"):
@@ -190,7 +210,7 @@ async def dispatch_message(message: dict, token: str) -> None:
             supabase = get_supabase()
             supabase.table("portafolios").insert({
                 "usuario_id": user_id,
-                "tipo": "plan_renta_temp",
+                "tipo": "conservador",
                 "estado_wizard": "pidiendo_capital",
                 "activo": False,
             }).execute()
@@ -284,7 +304,7 @@ async def _handle_mis_portafolios(user_id: str, chat_id: int, token: str) -> Non
     supabase = get_supabase()
     result = (
         supabase.table("portafolios")
-        .select("tipo, nombre_personalizado, nombre_sugerido, capital_usd, asignacion_rf_pct, objetivo, plazo, estado_wizard")
+        .select("tipo, nombre_personalizado, nombre_sugerido, capital_usd, capital_ars, asignacion_rf_pct, objetivo, plazo, estado_wizard")
         .eq("usuario_id", user_id)
         .eq("activo", True)
         .order("id")
@@ -308,14 +328,22 @@ async def _handle_mis_portafolios(user_id: str, chat_id: int, token: str) -> Non
         nombre = p.get("nombre_personalizado") or p.get("nombre_sugerido") or p["tipo"].capitalize()
         tipo = p["tipo"]
         emoji = _TIPO_EMOJI.get(tipo, "📊")
-        capital = p.get("capital_usd") or 0
+        capital_usd = p.get("capital_usd") or 0
+        capital_ars = p.get("capital_ars") or 0
         rf_pct = p.get("asignacion_rf_pct") or 0
         objetivo = p.get("objetivo") or "—"
         plazo = p.get("plazo")
         estado = p.get("estado_wizard", "activo")
 
+        cap_parts = []
+        if capital_usd:
+            cap_parts.append(f"${capital_usd:,.0f} USD")
+        if capital_ars:
+            cap_parts.append(f"${capital_ars:,.0f} ARS")
+        cap_txt = " + ".join(cap_parts) if cap_parts else "sin capital"
+
         lines.append(f"{emoji} *{nombre}* ({tipo.capitalize()})")
-        lines.append(f"   Capital: ${capital:,.0f} USD | RF: {rf_pct:.0f}%")
+        lines.append(f"   Capital: {cap_txt} | RF: {rf_pct:.0f}%")
         if plazo:
             lines.append(f"   Plazo: {plazo}")
         lines.append(f"   Objetivo: {objetivo}")
@@ -323,4 +351,5 @@ async def _handle_mis_portafolios(user_id: str, chat_id: int, token: str) -> Non
             lines.append(f"   ⚠️ En configuración ({estado})")
         lines.append("")
 
+    lines.append("_Sumá capital: `sumé 500 USD al conservador`_")
     await _send(chat_id, "\n".join(lines).strip(), token)
