@@ -104,15 +104,15 @@ export default function LiquidezTab() {
           </div>
           <div>
             <span className="text-fg2">Carry mensual:</span>
-            <p className="font-bold text-lg">{carry_trade.carry_mensual:+.2f}%</p>
+            <p className="font-bold text-lg">{carry_trade.carry_mensual > 0 ? '+' : ''}{carry_trade.carry_mensual.toFixed(2)}%</p>
           </div>
           <div>
             <span className="text-fg2">TNA caución:</span>
-            <p className="font-bold">{carry_trade.tna_mensual:.1f}%/mes</p>
+            <p className="font-bold">{carry_trade.tna_mensual.toFixed(1)}%/mes</p>
           </div>
           <div>
             <span className="text-fg2">Dólar MEP:</span>
-            <p className="font-bold">${dolar_mep:,.2f}</p>
+            <p className="font-bold">${dolar_mep.toLocaleString('es-AR', { maximumFractionDigits: 2 })}</p>
           </div>
         </div>
       </div>
@@ -123,13 +123,13 @@ export default function LiquidezTab() {
         <div className="grid grid-cols-2 gap-4 text-sm">
           <div>
             <span className="text-fg2">Capital invertido:</span>
-            <p className="font-bold text-lg">${total_ars:,.0f}</p>
-            <p className="text-xs text-fg2">≈ ${total_usd:,.0f} USD</p>
+            <p className="font-bold text-lg">${total_ars.toLocaleString('es-AR', { maximumFractionDigits: 0 })}</p>
+            <p className="text-xs text-fg2">≈ ${total_usd.toLocaleString('es-AR', { maximumFractionDigits: 0 })} USD</p>
           </div>
           <div>
             <span className="text-fg2">Rendimiento acumulado:</span>
-            <p className="font-bold text-lg text-green-500">${rendimiento_total_usd:+,.2f}</p>
-            <p className="text-xs text-fg2">{(rendimiento_total_usd / total_usd * 100):+.2f}%</p>
+            <p className="font-bold text-lg text-green-500">${rendimiento_total_usd > 0 ? '+' : ''}{rendimiento_total_usd.toLocaleString('es-AR', { maximumFractionDigits: 2 })}</p>
+            <p className="text-xs text-fg2">{(rendimiento_total_usd > 0 ? '+' : '')} {(rendimiento_total_usd / total_usd * 100).toFixed(2)}%</p>
           </div>
           <div>
             <span className="text-fg2">Posiciones abiertas:</span>
@@ -223,19 +223,19 @@ export default function LiquidezTab() {
                         <div className="font-medium">{inst.nombre}</div>
                         <div className="text-xs text-fg2">{pos.tipo}{broker_txt}</div>
                       </td>
-                      <td className="text-right">${pos.monto_ars:,.0f}</td>
+                      <td className="text-right">${pos.monto_ars.toLocaleString('es-AR', { maximumFractionDigits: 0 })}</td>
                       <td className="text-right text-xs text-fg2">
-                        ${precio_actual:,.2f}
+                        ${precio_actual.toLocaleString('es-AR', { maximumFractionDigits: 2 })}
                       </td>
                       <td className="text-right font-medium">{pos.tna_contratada?.toFixed(1)}%</td>
                       <td className="text-right">
                         <span className={variacion > 0 ? 'text-green-500' : 'text-red-500'}>
-                          {variacion:+.2f}%
+                          {variacion > 0 ? '+' : ''}{variacion.toFixed(2)}%
                         </span>
                       </td>
                       <td className="text-right text-xs text-fg2">{venc}</td>
                       <td className="text-right font-medium">
-                        <span className="text-green-500">${pos.rendimiento_acumulado ?? 0:+,.2f}</span>
+                        <span className="text-green-500">${(pos.rendimiento_acumulado ?? 0) > 0 ? '+' : ''}{(pos.rendimiento_acumulado ?? 0).toLocaleString('es-AR', { maximumFractionDigits: 2 })}</span>
                       </td>
                     </tr>
                   )
