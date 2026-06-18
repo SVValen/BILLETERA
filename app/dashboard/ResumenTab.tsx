@@ -1,16 +1,26 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState } from 'react'
 import { fetchWithAuth } from '@/lib/fetch-with-auth'
 import {
-  PieChart, Pie, Cell, Tooltip, Legend,
+  PieChart, Pie, Cell, Tooltip,
   BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer,
 } from 'recharts'
 
-const COLORS = ['#6366f1', '#f59e0b', '#ef4444', '#06b6d4', '#a855f7', '#ec4899', '#84cc16']
+const COLORS = [
+  '#6366f1', '#f59e0b', '#ef4444', '#06b6d4', '#a855f7',
+  '#ec4899', '#84cc16', '#f97316', '#14b8a6', '#8b5cf6',
+  '#0ea5e9', '#d946ef', '#10b981', '#fb923c',
+]
 
 function fmt(n: number) {
   return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(n)
+}
+
+function fmtK(n: number) {
+  return n >= 1_000_000
+    ? `$${(n / 1_000_000).toFixed(1)}M`
+    : `$${(n / 1000).toFixed(0)}k`
 }
 
 interface Stats {
@@ -43,6 +53,18 @@ interface Recurrente {
   dias_faltan: number
 }
 
+// Tooltip personalizado para el donut
+function PieTooltip({ active, payload }: { active?: boolean; payload?: Array<{ name: string; value: number; payload: { pct: number } }> }) {
+  if (!active || !payload?.length) return null
+  const { name, value, payload: p } = payload[0]
+  return (
+    <div style={{ background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 12px', fontSize: 13 }}>
+      <div style={{ fontWeight: 600 }}>{name}</div>
+      <div>{fmt(value)} · {p.pct}%</div>
+    </div>
+  )
+}
+
 export default function ResumenTab({ mes }: { mes: string }) {
   const [stats, setStats] = useState<Stats | null>(null)
   const [cuotas, setCuotas] = useState<Cuota[]>([])
@@ -50,36 +72,46 @@ export default function ResumenTab({ mes }: { mes: string }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  const fetchData = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      const [sRes, cRes, rRes] = await Promise.all([
-        fetchWithAuth(`/api/stats?mes=${mes}`),
-        fetchWithAuth(`/api/cuotas?mes=${mes}`),
-        fetchWithAuth(`/api/recurrentes?dias=35`),
-      ])
-      if (!sRes.ok) throw new Error('Error al cargar estadísticas')
-      const [sData, cData, rData] = await Promise.all([sRes.json(), cRes.json(), rRes.json()])
-      setStats(sData)
-      setCuotas(Array.isArray(cData) ? cData : [])
-      setRecurrentes(Array.isArray(rData) ? rData : [])
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Error desconocido')
-    } finally {
-      setLoading(false)
+  useEffect(() => {
+    let cancelled = false
+    async function load() {
+      setLoading(true)
+      setError(null)
+      try {
+        const [sRes, cRes, rRes] = await Promise.all([
+          fetchWithAuth(`/api/stats?mes=${mes}`),
+          fetchWithAuth(`/api/cuotas?mes=${mes}`),
+          fetchWithAuth(`/api/recurrentes?dias=35`),
+        ])
+        if (cancelled) return
+        if (!sRes.ok) throw new Error('Error al cargar estadísticas')
+        const [sData, cData, rData] = await Promise.all([sRes.json(), cRes.json(), rRes.json()])
+        if (cancelled) return
+        setStats(sData)
+        setCuotas(Array.isArray(cData) ? cData : [])
+        setRecurrentes(Array.isArray(rData) ? rData : [])
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e.message : 'Error desconocido')
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
     }
+    load()
+    return () => { cancelled = true }
   }, [mes])
-
-  useEffect(() => { fetchData() }, [fetchData])
 
   if (loading) return <p className="loading">Cargando...</p>
   if (error) return <div className="error-banner">{error}</div>
   if (!stats) return null
 
-  const pieData = Object.entries(stats.por_categoria).map(([name, v]) => ({
-    name: `${v.emoji} ${name}`, value: v.monto,
-  }))
+  // Categorías ordenadas por monto desc
+  const cats = Object.entries(stats.por_categoria)
+    .map(([name, v]) => ({ name: `${v.emoji} ${name}`, value: v.monto }))
+    .sort((a, b) => b.value - a.value)
+
+  const total = cats.reduce((s, c) => s + c.value, 0)
+  const pieData = cats.map(c => ({ ...c, pct: total > 0 ? Math.round(c.value / total * 100) : 0 }))
+
   const barData = [{ name: mes, Gastos: stats.total_gastos, Ingresos: stats.total_ingresos }]
 
   return (
@@ -102,32 +134,58 @@ export default function ResumenTab({ mes }: { mes: string }) {
 
       {/* Gráficos */}
       <div className="charts">
+        {/* Donut por categoría */}
         <div className="chart-box">
           <h3>Por categoría</h3>
           {pieData.length === 0 ? (
             <p className="empty">Sin gastos este mes</p>
           ) : (
-            <ResponsiveContainer width="100%" height={230}>
-              <PieChart>
-                <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={85} label={false}>
-                  {pieData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
-                </Pie>
-                <Tooltip formatter={(v) => fmt(v as number)} />
-                <Legend iconSize={10} wrapperStyle={{ fontSize: 12 }} />
-              </PieChart>
-            </ResponsiveContainer>
+            <>
+              <ResponsiveContainer width="100%" height={200}>
+                <PieChart>
+                  <Pie
+                    data={pieData}
+                    dataKey="value"
+                    nameKey="name"
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={55}
+                    outerRadius={90}
+                    paddingAngle={2}
+                    label={false}
+                  >
+                    {pieData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+                  </Pie>
+                  <Tooltip content={<PieTooltip />} />
+                </PieChart>
+              </ResponsiveContainer>
+
+              {/* Lista de categorías debajo */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
+                {pieData.map((c, i) => (
+                  <div key={c.name} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
+                    <span style={{ width: 10, height: 10, borderRadius: 2, background: COLORS[i % COLORS.length], flexShrink: 0 }} />
+                    <span style={{ flex: 1, color: 'var(--fg1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</span>
+                    <span style={{ color: 'var(--fg3)', fontSize: 12, marginLeft: 4 }}>{c.pct}%</span>
+                    <span style={{ fontWeight: 600, flexShrink: 0 }}>{fmt(c.value)}</span>
+                  </div>
+                ))}
+              </div>
+            </>
           )}
         </div>
+
+        {/* Bar chart */}
         <div className="chart-box">
           <h3>Resumen del mes</h3>
-          <ResponsiveContainer width="100%" height={230}>
+          <ResponsiveContainer width="100%" height={200}>
             <BarChart data={barData} margin={{ top: 4, right: 4, left: 10, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} />
               <XAxis dataKey="name" tick={{ fontSize: 12 }} />
-              <YAxis tickFormatter={v => `$${(v / 1000).toFixed(0)}k`} tick={{ fontSize: 11 }} />
+              <YAxis tickFormatter={fmtK} tick={{ fontSize: 11 }} width={52} />
               <Tooltip formatter={(v) => fmt(v as number)} />
-              <Bar dataKey="Gastos" fill="#ef4444" radius={[6, 6, 0, 0]} />
-              <Bar dataKey="Ingresos" fill="#22c55e" radius={[6, 6, 0, 0]} />
+              <Bar dataKey="Gastos" fill="#ef4444" radius={[6, 6, 0, 0]} label={{ position: 'top', formatter: fmtK, fontSize: 11, fill: 'var(--fg2)' }} />
+              <Bar dataKey="Ingresos" fill="#22c55e" radius={[6, 6, 0, 0]} label={{ position: 'top', formatter: fmtK, fontSize: 11, fill: 'var(--fg2)' }} />
             </BarChart>
           </ResponsiveContainer>
         </div>
@@ -149,7 +207,9 @@ export default function ResumenTab({ mes }: { mes: string }) {
                 </div>
                 <div className="cuota-meta">
                   <span>Cuota {c.pagadas}/{c.num_cuotas}</span>
-                  <span className="muted">Próxima: {new Date(c.proxima_cuota + 'T12:00:00').toLocaleDateString('es-AR', { day: 'numeric', month: 'short' })}</span>
+                  {c.proxima_cuota && (
+                    <span className="muted">Próxima: {new Date(c.proxima_cuota + 'T12:00:00').toLocaleDateString('es-AR', { day: 'numeric', month: 'short' })}</span>
+                  )}
                 </div>
               </div>
             ))}
