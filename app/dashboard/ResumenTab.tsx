@@ -56,7 +56,7 @@ export default function ResumenTab({ mes }: { mes: string }) {
     try {
       const [sRes, cRes, rRes] = await Promise.all([
         fetchWithAuth(`/api/stats?mes=${mes}`),
-        fetchWithAuth(`/api/cuotas`),
+        fetchWithAuth(`/api/cuotas?mes=${mes}`),
         fetchWithAuth(`/api/recurrentes?dias=35`),
       ])
       if (!sRes.ok) throw new Error('Error al cargar estadísticas')

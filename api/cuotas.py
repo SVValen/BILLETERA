@@ -30,7 +30,12 @@ async def get_cuotas(request: Request):
         .execute()
     )
 
-    hoy = date.today()
+    mes_param = request.query_params.get("mes", "")
+    try:
+        ref = date.fromisoformat(f"{mes_param}-01") if mes_param else date.today()
+    except ValueError:
+        ref = date.today()
+
     result = []
     for p in (rows.data or []):
         primera = date.fromisoformat(p["fecha_primera_cuota"])
@@ -38,7 +43,7 @@ async def get_cuotas(request: Request):
         cuota_inicio = p.get("cuota_inicio", 1)
 
         # primera es la fecha de cuota_inicio, no necesariamente cuota 1
-        meses_desde_inicio = (hoy.year - primera.year) * 12 + (hoy.month - primera.month)
+        meses_desde_inicio = (ref.year - primera.year) * 12 + (ref.month - primera.month)
         pagadas = min(cuota_inicio - 1 + meses_desde_inicio + 1, n)
         restantes = n - pagadas
 
