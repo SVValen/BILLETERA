@@ -17,7 +17,8 @@ function fmt(n: number) {
   return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(n)
 }
 
-function fmtK(n: number) {
+function fmtK(v: number | string | undefined) {
+  const n = typeof v === 'number' ? v : 0
   return n >= 1_000_000
     ? `$${(n / 1_000_000).toFixed(1)}M`
     : `$${(n / 1000).toFixed(0)}k`
