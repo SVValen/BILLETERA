@@ -98,8 +98,14 @@ async def handle_movimiento_callback(
         primer_fecha = _first_of_month(add_months(hoy, meses))
         if token:
             await _answer_callback(callback_id, token)
-            await _edit_message(chat_id, message_id,
-                f"📅 Primera cuota: {primer_fecha.strftime('%d/%m/%Y')} — creando movimientos...", token)
+            plan_data = supabase.table("cuotas_plan").select("cuota_inicio, num_cuotas").eq("id", plan_id).single().execute()
+            cuota_inicio = (plan_data.data or {}).get("cuota_inicio", 1)
+            num_cuotas = (plan_data.data or {}).get("num_cuotas", "?")
+            if cuota_inicio and cuota_inicio > 1:
+                label = f"📅 Cuota {cuota_inicio}/{num_cuotas}: {primer_fecha.strftime('%d/%m/%Y')} — creando movimientos..."
+            else:
+                label = f"📅 Primera cuota: {primer_fecha.strftime('%d/%m/%Y')} — creando movimientos..."
+            await _edit_message(chat_id, message_id, label, token)
             await _create_cuota_movimientos(plan_id, primer_fecha, token)
         return True
 
