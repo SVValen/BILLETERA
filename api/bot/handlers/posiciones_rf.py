@@ -1,6 +1,7 @@
 import re as _re
 import json as _json
 import urllib.parse
+from datetime import date
 from lib.supabase_client import get_supabase
 from ..tg import _send, _answer_callback, _edit_message, _get_dolar_oficial
 
@@ -49,9 +50,28 @@ def _parse_posicion_rf(text: str) -> dict | None:
 async def _handle_nueva_posicion_rf(datos: dict, user_id: str, chat_id: int, token: str) -> None:
     """Confirma con el usuario antes de registrar una posición de RF."""
     supabase = get_supabase()
+
+    # Resolver portafolio — usa el de mayor asignación RF como default
+    ports = (
+        supabase.table("portafolios")
+        .select("id, asignacion_rf_pct, nombre_personalizado, nombre_sugerido")
+        .eq("usuario_id", user_id)
+        .eq("activo", True)
+        .eq("estado_wizard", "activo")
+        .order("asignacion_rf_pct", desc=True)
+        .limit(1)
+        .execute()
+    )
+    if not ports.data:
+        await _send(chat_id, "No tenés portafolios activos. Creá uno con /portafolio_nuevo.", token, parse_mode="")
+        return
+    portafolio = ports.data[0]
+    portafolio_id = portafolio["id"]
+
     monto_ars = datos["monto_ars"]
     tipo = datos["tipo"]
 
+    # Resolver instrumento
     instrumento = None
     if tipo == "caucion":
         plazo = datos.get("plazo_dias", 7)
@@ -64,36 +84,38 @@ async def _handle_nueva_posicion_rf(datos: dict, user_id: str, chat_id: int, tok
             inst_r = supabase.table("instrumentos_rf").select("*").eq("codigo", datos["ticker"].upper()).limit(1).execute()
         instrumento = inst_r.data[0] if inst_r.data else None
 
-    monto_usd = None
-    tipo_cambio = None
+    if not instrumento:
+        ticker_txt = datos.get("ticker") or tipo
+        await _send(chat_id, f"No encontré *{ticker_txt}* en la base de instrumentos RF. Verificá el ticker.", token, parse_mode="")
+        return
+
+    # Requiere dólar para monto_usd_entrada (NOT NULL en schema)
     dolar = await _get_dolar_oficial()
-    if dolar:
-        tipo_cambio = dolar
-        monto_usd = round(monto_ars / tipo_cambio, 2)
+    if not dolar:
+        await _send(chat_id, "No pude obtener el tipo de cambio para calcular el equivalente USD. Intentá de nuevo.", token, parse_mode="")
+        return
 
-    tna = instrumento.get("tna_actual") if instrumento else None
-    nombre = instrumento.get("nombre") if instrumento else (datos.get("ticker") or tipo)
-    instrumento_id = instrumento["id"] if instrumento else None
+    monto_usd_entrada = round(monto_ars / dolar, 2)
+    tna = instrumento.get("tna_actual")
+    nombre = instrumento.get("nombre") or tipo
+    port_nombre = portafolio.get("nombre_personalizado") or portafolio.get("nombre_sugerido") or "Portafolio"
 
-    usd_txt = f" (≈${monto_usd:,.0f} USD)" if monto_usd else ""
     tna_txt = f" @ {tna:.1f}% TNA" if tna else ""
-
     payload = {
-        "instrumento_id": instrumento_id,
-        "tipo": tipo,
+        "portafolio_id": portafolio_id,
+        "instrumento_id": instrumento["id"],
         "monto_ars": monto_ars,
-        "monto_usd": monto_usd,
-        "tipo_cambio": tipo_cambio,
-        "tna": tna,
-        "notas": datos.get("ticker"),
+        "monto_usd_entrada": monto_usd_entrada,
+        "tna_contratada": tna,
+        "fecha_vencimiento": instrumento.get("fecha_vencimiento"),
     }
     payload_enc = urllib.parse.quote(_json.dumps(payload))
 
     await _send(chat_id,
         f"📄 *Confirmar posición RF*\n\n"
-        f"Instrumento: *{nombre}*\n"
-        f"Monto: ${monto_ars:,.0f} ARS{usd_txt}\n"
-        f"Tipo: {tipo}{tna_txt}\n\n"
+        f"Instrumento: *{nombre}*{tna_txt}\n"
+        f"Monto: ${monto_ars:,.0f} ARS (≈${monto_usd_entrada:,.0f} USD)\n"
+        f"Portafolio: {port_nombre}\n\n"
         f"¿Registrar esta posición?",
         token,
         reply_markup={"inline_keyboard": [[
@@ -110,24 +132,21 @@ async def handle_rf_callback(
     if parts[0] == "rf_confirmar" and len(parts) >= 2:
         try:
             datos = _json.loads(urllib.parse.unquote(":".join(parts[1:])))
-            instrumento_id = datos.get("instrumento_id")
             supabase.table("posiciones_rf").insert({
                 "usuario_id": user_id,
-                "instrumento_id": instrumento_id,
-                "tipo": datos.get("tipo"),
+                "portafolio_id": datos["portafolio_id"],
+                "instrumento_id": datos["instrumento_id"],
                 "monto_ars": datos["monto_ars"],
-                "monto_usd": datos.get("monto_usd"),
-                "tipo_cambio_entrada": datos.get("tipo_cambio"),
-                "tna_contratada": datos.get("tna"),
+                "monto_usd_entrada": datos["monto_usd_entrada"],
+                "tna_contratada": datos.get("tna_contratada"),
                 "fecha_vencimiento": datos.get("fecha_vencimiento"),
-                "notas": datos.get("notas"),
             }).execute()
             if token:
                 await _answer_callback(callback_id, token)
                 await _edit_message(chat_id, message_id,
                     "✅ *Posición registrada.*\n\nUsá /liquidez para ver el estado de tu renta fija.",
                     token)
-        except Exception:
+        except Exception as e:
             if token:
                 await _answer_callback(callback_id, token, text="Error al registrar posición")
         return True
@@ -142,11 +161,14 @@ async def handle_rf_callback(
         pos_id = int(parts[1])
         pos_r = supabase.table("posiciones_rf").select("id, usuario_id").eq("id", pos_id).eq("usuario_id", user_id).limit(1).execute()
         if pos_r.data:
-            supabase.table("posiciones_rf").update({"estado": "rescatada"}).eq("id", pos_id).execute()
+            supabase.table("posiciones_rf").update({
+                "estado": "cerrada",
+                "fecha_cierre": date.today().isoformat(),
+            }).eq("id", pos_id).execute()
             if token:
                 await _answer_callback(callback_id, token)
                 await _edit_message(chat_id, message_id,
-                    "✅ Posición marcada como rescatada. Usá /liquidez para ver el estado actualizado.",
+                    "✅ Posición cerrada. Usá /liquidez para ver el estado actualizado.",
                     token)
         return True
 

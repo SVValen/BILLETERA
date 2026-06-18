@@ -382,8 +382,9 @@ async def handle_wizard_text(
 
     # ── Objetivo libre ──
     if estado == "configurando_objetivo":
-        supabase.table("portafolios").update({"objetivo": text.strip()}).eq("id", portafolio_id).execute()
-        portafolio["objetivo"] = text.strip()
+        objetivo = text.strip()[:50]
+        supabase.table("portafolios").update({"objetivo": objetivo}).eq("id", portafolio_id).execute()
+        portafolio["objetivo"] = objetivo
         await _next_step_after_objetivo(portafolio, chat_id, token, supabase)
         return True
 
