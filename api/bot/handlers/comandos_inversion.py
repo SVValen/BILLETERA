@@ -13,37 +13,19 @@ async def _handle_inversiones_cmd(user_id: str, chat_id: int, token: str) -> Non
         await _send(chat_id, "No tenés portafolios activos. Creá uno con /portafolio_nuevo.", token, parse_mode="")
         return
 
-    # Compatibilidad Fase 4 pendiente: mostrar recomendaciones básicas
-    p = {}  # TODO Fase 4: reemplazar con datos de portafolios
+    # Mostrar todos los portafolios con sus recomendaciones pendientes
+    ports_r = supabase.table("portafolios").select("id, tipo, nombre_personalizado, nombre_sugerido, capital_usd, asignacion_rf_pct").eq("usuario_id", user_id).eq("activo", True).eq("estado_wizard", "activo").execute()
+    portafolios = ports_r.data or []
 
-    obj_labels = {
-        "ingresos_pasivos": "💰 Ingresos pasivos",
-        "crecimiento": "📈 Crecer capital",
-        "cobertura": "🛡️ Cobertura inflación",
-        "meta_especifica": "🎯 Meta específica",
-    }
-    plazo_labels = {"corto": "< 1 año", "mediano": "1-3 años", "largo": "+3 años"}
-    perfil_emoji = {"conservador": "🛡️", "moderado": "⚖️", "arriesgado": "🚀"}.get(p.get("perfil", ""), "📈")
-    plazo_txt = plazo_labels.get(p.get("plazo", ""), "")
-    _obj_raw = p.get("objetivos") or p.get("objetivo") or ""
-    if _obj_raw and _obj_raw.startswith("["):
-        try:
-            _obj_list = _json.loads(_obj_raw)
-            obj_txt = " + ".join(obj_labels.get(o, o) for o in _obj_list)
-        except Exception:
-            obj_txt = _obj_raw
-    else:
-        obj_txt = obj_labels.get(_obj_raw, _obj_raw)
-    header = f"📈 *Inversiones*"
-    if obj_txt:
-        header += f" — {obj_txt}"
-    lines = [header]
-    if plazo_txt:
-        lines.append(f"⏱ Plazo: {plazo_txt}")
-    if p.get("perfil"):
-        lines.append(f"🎚 Riesgo derivado: {perfil_emoji} {p['perfil'].capitalize()}")
-    if p.get("capital_disponible"):
-        lines.append(f"💰 Capital: ${p['capital_disponible']:,.0f}")
+    _TIPO_EMOJI = {"conservador": "🛡️", "pasivo": "💰", "crecimiento": "📈", "oportunista": "🎯"}
+    lines = ["📈 *Inversiones*\n"]
+
+    for port in portafolios:
+        nombre = port.get("nombre_personalizado") or port.get("nombre_sugerido") or port["tipo"].capitalize()
+        emoji = _TIPO_EMOJI.get(port["tipo"], "📊")
+        capital = port.get("capital_usd") or 0
+        rf = port.get("asignacion_rf_pct") or 0
+        lines.append(f"{emoji} *{nombre}* — ${capital:,.0f} USD | RF {rf:.0f}%")
 
     recs_r = (
         supabase.table("recomendaciones")
@@ -51,31 +33,28 @@ async def _handle_inversiones_cmd(user_id: str, chat_id: int, token: str) -> Non
         .eq("usuario_id", user_id)
         .eq("estado", "pendiente")
         .order("generado_at", desc=True)
-        .limit(3)
+        .limit(5)
         .execute()
     )
     if recs_r.data:
         lines.append(f"\n⏳ *{len(recs_r.data)} recomendación(es) pendiente(s):*")
         for r in recs_r.data:
             a = r.get("activos") or {}
-            emoji = "🟢" if r["accion"] == "comprar" else "🔴" if r["accion"] == "vender" else "🟡"
-            lines.append(f"{emoji} {r['accion'].upper()} {a.get('codigo', '?')} — confianza {r['confianza']}/10")
+            icon = "🟢" if r["accion"] == "comprar" else "🔴"
+            lines.append(f"{icon} {r['accion'].upper()} {a.get('codigo', '?')} — confianza {r['confianza']}/10")
     else:
-        lines.append("\n✅ Sin señales ahora. El sistema revisa cada 30 minutos.")
+        lines.append("\n✅ Sin señales ahora. El cron revisa cada 30 minutos.")
 
     stats_r = supabase.table("decisiones_inversion").select("resultado, accion").eq("usuario_id", user_id).execute()
     decisiones = stats_r.data or []
     aceptadas = [d for d in decisiones if d["accion"] == "aceptada"]
-    exitosas = [d for d in aceptadas if d["resultado"] == "exitoso"]
+    exitosas = [d for d in aceptadas if d.get("resultado") == "exitoso"]
     if aceptadas:
         winrate = round(len(exitosas) / len(aceptadas) * 100)
         lines.append(f"\n🎯 Winrate: {winrate}% ({len(exitosas)}/{len(aceptadas)})")
 
-    lines.append("\n_/inversiones para actualizar_")
-    await _send(chat_id, "\n".join(lines), token,
-        reply_markup={"inline_keyboard": [[
-            {"text": "✏️ Cambiar perfil", "callback_data": "inv_cambiar_perfil"},
-        ]]})
+    lines.append("\n_/portafolio — distribución | /liquidez — RF | /precios — cotizaciones_")
+    await _send(chat_id, "\n".join(lines), token)
 
 
 async def _handle_precios_cmd(user_id: str, chat_id: int, token: str) -> None:
@@ -107,8 +86,9 @@ async def _handle_precios_cmd(user_id: str, chat_id: int, token: str) -> None:
             lines.append(f"💵 {label} — error")
 
     supabase = get_supabase()
-    ua_r = supabase.table("usuario_activos").select("activo_id").eq("usuario_id", user_id).execute()
-    activos_ids = [row["activo_id"] for row in (ua_r.data or [])]
+    # Obtener todos los activos monitoreados por el usuario (de cualquier portafolio)
+    pa_r = supabase.table("portafolio_activos").select("activo_id").eq("usuario_id", user_id).execute()
+    activos_ids = list({row["activo_id"] for row in (pa_r.data or [])})
 
     if activos_ids:
         activos_r = supabase.table("activos").select("id, codigo, nombre, tipo, fuente, simbolo_fuente, moneda").in_("id", activos_ids).execute()
@@ -140,23 +120,25 @@ async def _handle_precios_cmd(user_id: str, chat_id: int, token: str) -> None:
 
 
 async def _handle_liquidez_cmd(user_id: str, chat_id: int, token: str, portafolio: dict | None = None) -> None:
-    from lib.market_data import fetch_dolar_precio, fetch_caucion_tna
-    from lib.rf_analysis import analizar_carry_trade, calcular_rendimiento_usd, calcular_allocation, evaluar_vencimientos
+    from lib.market_data import fetch_dolar_precio
+    from lib.rf_analysis import analizar_carry_trade, calcular_rendimiento_usd, calcular_allocation
 
     supabase = get_supabase()
 
-    perfil_r = supabase.table("perfiles_inversion").select("capital_usd, asignacion_rf_pct").eq("usuario_id", user_id).limit(1).execute()
-    perfil = perfil_r.data[0] if perfil_r.data else {}
-    capital_usd = perfil.get("capital_usd")
-    asignacion_obj = perfil.get("asignacion_rf_pct") or 30
+    capital_usd = portafolio.get("capital_usd") if portafolio else None
+    asignacion_obj = portafolio.get("asignacion_rf_pct") or 30 if portafolio else 30
+    portafolio_id = portafolio.get("id") if portafolio else None
+    nombre_port = portafolio.get("nombre_personalizado") or portafolio.get("nombre_sugerido") or "Portafolio" if portafolio else "Portafolio"
 
     dolar_data = await fetch_dolar_precio("bolsa")
     dolar_mep = dolar_data["precio"] if dolar_data else None
 
-    pos_r = supabase.table("posiciones_rf").select("*, instrumentos_rf(nombre, tipo, tna_actual)").eq("usuario_id", user_id).eq("estado", "activa").execute()
-    posiciones = pos_r.data or []
+    pos_q = supabase.table("posiciones_rf").select("*, instrumentos_rf(nombre, tipo, tna_actual)").eq("usuario_id", user_id).eq("estado", "abierta")
+    if portafolio_id:
+        pos_q = pos_q.eq("portafolio_id", portafolio_id)
+    posiciones = (pos_q.execute()).data or []
 
-    lines = ["💼 *Liquidez y Renta Fija*\n"]
+    lines = [f"💼 *Liquidez y RF — {nombre_port}*\n"]
 
     if dolar_mep:
         caucion_r = supabase.table("instrumentos_rf").select("tna_actual").eq("codigo", "CAUCION_7D").limit(1).execute()
@@ -180,9 +162,9 @@ async def _handle_liquidez_cmd(user_id: str, chat_id: int, token: str, portafoli
     if capital_usd and dolar_mep:
         alloc = calcular_allocation(posiciones, capital_usd, dolar_mep)
         lines.append(
-            f"📊 *Allocation actual*\n"
-            f"  Capital total: ${capital_usd:,.0f} USD\n"
-            f"  En RF: ${alloc['total_usd_rf']:,.0f} USD ({alloc['pct_rf']}%) — objetivo {asignacion_obj}%\n"
+            f"📊 *Allocation*\n"
+            f"  Capital: ${capital_usd:,.0f} USD\n"
+            f"  En RF: ${alloc['total_usd_rf']:,.0f} USD ({alloc['pct_rf']}%) — objetivo {asignacion_obj:.0f}%\n"
             f"  Libre: ${alloc['total_usd_libre']:,.0f} USD ({alloc['pct_libre']}%)\n"
         )
 
@@ -196,16 +178,14 @@ async def _handle_liquidez_cmd(user_id: str, chat_id: int, token: str, portafoli
             venc_txt = f" | vence {venc}" if venc else ""
             rdto_txt = ""
             if dolar_mep:
-                rdto = calcular_rendimiento_usd(p, dolar_mep)
-                rdto_txt = f" | {rdto['rendimiento_usd_pct']:+.1f}% USD"
-            lines.append(
-                f"  • {nombre}: ${p['monto_ars']:,.0f} ARS @ {tna:.1f}% TNA{venc_txt}{rdto_txt}"
-            )
-            lines.append(
-                f"    [Rescatar](tg://callback/rf_rescatar:{p['id']})"
-            )
+                try:
+                    rdto = calcular_rendimiento_usd(p, dolar_mep)
+                    rdto_txt = f" | {rdto['rendimiento_usd_pct']:+.1f}% USD"
+                except Exception:
+                    pass
+            lines.append(f"  • {nombre}: ${p['monto_ars']:,.0f} ARS @ {tna:.1f}% TNA{venc_txt}{rdto_txt}")
     else:
-        lines.append("_Sin posiciones RF abiertas._\n\nPara registrar una posición escribí por ejemplo:\n`puse 500000 en caución 7 días`")
+        lines.append("_Sin posiciones RF abiertas._\n\nPara registrar:\n`puse 500000 en caución 7 días`")
 
     await _send(chat_id, "\n".join(lines), token)
 
@@ -213,51 +193,53 @@ async def _handle_liquidez_cmd(user_id: str, chat_id: int, token: str, portafoli
 async def _handle_portafolio_cmd(user_id: str, chat_id: int, token: str, portafolio: dict | None = None) -> None:
     supabase = get_supabase()
 
-    ua_r = supabase.table("usuario_activos").select("activo_id, porcentaje, monto_ars, precio_entrada").eq("usuario_id", user_id).execute()
-    if not ua_r.data:
-        await _send(chat_id,
-            "📊 No tenés activos configurados todavía.\nUsá /inversiones para empezar.",
-            token, parse_mode="")
-        return
+    portafolio_id = portafolio.get("id") if portafolio else None
+    nombre_port = portafolio.get("nombre_personalizado") or portafolio.get("nombre_sugerido") or "Portafolio" if portafolio else "Portafolio"
+    tipo_port = portafolio.get("tipo", "") if portafolio else ""
+    capital_usd = portafolio.get("capital_usd") if portafolio else None
+    rf_pct = portafolio.get("asignacion_rf_pct") if portafolio else None
 
-    activos_ids = [row["activo_id"] for row in ua_r.data]
-    activos_r = supabase.table("activos").select("id, codigo, nombre, tipo, moneda, precio_actual, precio_ars, tendencia, rsi").in_("id", activos_ids).execute()
-    activos_map = {a["id"]: a for a in (activos_r.data or [])}
-    ua_map = {row["activo_id"]: row for row in ua_r.data}
-
+    _TIPO_EMOJI = {"conservador": "🛡️", "pasivo": "💰", "crecimiento": "📈", "oportunista": "🎯"}
     tipo_icon = {"crypto": "₿", "cedear": "🏢", "accion_ar": "🇦🇷", "dolar": "💵"}
     tend_icon = {"alcista": "📈", "bajista": "📉", "lateral": "➡️"}
 
-    lines = ["📊 *Tu Portafolio*\n"]
-    for activo_id, activo in activos_map.items():
-        ua = ua_map.get(activo_id, {})
-        icon = tipo_icon.get(activo.get("tipo", ""), "")
-        precio_actual = activo.get("precio_actual") or activo.get("precio_ars")
-        precio_entrada = ua.get("precio_entrada")
-        moneda = activo.get("moneda", "")
-        tend = tend_icon.get(activo.get("tendencia", "lateral"), "➡️")
-        rsi = activo.get("rsi")
+    lines = [f"📊 *{_TIPO_EMOJI.get(tipo_port, '📊')} {nombre_port}*\n"]
 
-        linea = f"{icon} *{activo['codigo']}* — {activo['nombre']}\n"
-        if precio_actual:
-            linea += f"   Precio: {precio_actual:,.2f} {moneda}  {tend}\n"
-        if rsi:
-            linea += f"   RSI: {rsi:.1f}\n"
-        if ua.get("porcentaje") and ua.get("monto_ars"):
-            linea += f"   Asignado: {ua['porcentaje']}% = ${ua['monto_ars']:,.0f} ARS\n"
-        if precio_entrada and precio_actual:
-            pnl = (float(precio_actual) - float(precio_entrada)) / float(precio_entrada) * 100
-            emoji_pnl = "📈" if pnl > 0 else "📉" if pnl < 0 else "➡️"
-            linea += f"   P&L desde entrada: {pnl:+.1f}% {emoji_pnl}\n"
-        lines.append(linea)
+    if capital_usd:
+        rv_pct = 100 - (rf_pct or 0)
+        lines.append(f"Capital: ${capital_usd:,.0f} USD | RF: {rf_pct:.0f}% | RV: {rv_pct:.0f}%\n")
 
-    perfil_r = supabase.table("perfiles_inversion").select("capital_disponible, perfil, objetivos").eq("usuario_id", user_id).limit(1).execute()
-    if perfil_r.data:
-        p = perfil_r.data[0]
-        perfil_emoji = {"conservador": "🛡️", "moderado": "⚖️", "arriesgado": "🚀"}.get(p.get("perfil", ""), "📈")
-        lines.append(f"\n{perfil_emoji} Perfil: {p.get('perfil', '?').capitalize()}")
-        if p.get("capital_disponible"):
-            lines.append(f"💰 Capital base: ${p['capital_disponible']:,.0f} ARS")
+    # Activos asignados al portafolio
+    if portafolio_id:
+        pa_r = supabase.table("portafolio_activos").select("activo_id, porcentaje_objetivo, monto_usd").eq("portafolio_id", portafolio_id).execute()
+        pa_data = pa_r.data or []
+    else:
+        pa_data = []
 
-    lines.append("\n_Precios actualizados por el cron cada 30 min_")
+    if pa_data:
+        activos_ids = [row["activo_id"] for row in pa_data]
+        activos_r = supabase.table("activos").select("id, codigo, nombre, tipo, moneda, precio_actual, precio_ars, tendencia, rsi").in_("id", activos_ids).execute()
+        activos_map = {a["id"]: a for a in (activos_r.data or [])}
+        pa_map = {row["activo_id"]: row for row in pa_data}
+
+        for activo_id, activo in activos_map.items():
+            pa = pa_map.get(activo_id, {})
+            icon = tipo_icon.get(activo.get("tipo", ""), "")
+            precio_actual = activo.get("precio_actual") or activo.get("precio_ars")
+            moneda = activo.get("moneda", "")
+            tend = tend_icon.get(activo.get("tendencia", "lateral"), "➡️")
+            rsi = activo.get("rsi")
+
+            linea = f"{icon} *{activo['codigo']}* — {activo['nombre']}\n"
+            if precio_actual:
+                linea += f"   Precio: {precio_actual:,.2f} {moneda}  {tend}\n"
+            if rsi:
+                linea += f"   RSI: {rsi:.1f}\n"
+            if pa.get("porcentaje_objetivo") and pa.get("monto_usd"):
+                linea += f"   Asignado: {pa['porcentaje_objetivo']}% = ${pa['monto_usd']:,.0f} USD\n"
+            lines.append(linea)
+    else:
+        lines.append("_Sin activos RV asignados todavía._\n")
+
+    lines.append("_Precios actualizados por el cron cada 30 min_")
     await _send(chat_id, "\n".join(lines), token)
