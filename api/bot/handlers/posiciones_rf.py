@@ -105,7 +105,7 @@ async def _handle_nueva_posicion_rf(datos: dict, user_id: str, chat_id: int, tok
         "portafolio_id": portafolio_id,
         "instrumento_id": instrumento["id"],
         "monto_ars": monto_ars,
-        "monto_usd_entrada": monto_usd_entrada,
+        "monto_usd": monto_usd_entrada,
         "tna_contratada": tna,
         "fecha_vencimiento": instrumento.get("fecha_vencimiento"),
     }
@@ -137,7 +137,7 @@ async def handle_rf_callback(
                 "portafolio_id": datos["portafolio_id"],
                 "instrumento_id": datos["instrumento_id"],
                 "monto_ars": datos["monto_ars"],
-                "monto_usd_entrada": datos["monto_usd_entrada"],
+                "monto_usd": datos["monto_usd"],
                 "tna_contratada": datos.get("tna_contratada"),
                 "fecha_vencimiento": datos.get("fecha_vencimiento"),
             }).execute()
