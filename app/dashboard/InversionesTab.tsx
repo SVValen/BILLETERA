@@ -3,20 +3,23 @@
 import { useEffect, useState, useCallback } from 'react'
 import { fetchWithAuth } from '@/lib/fetch-with-auth'
 
-function fmtARS(n: number) {
-  return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(n)
-}
 function fmtUSD(n: number) {
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(n)
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n)
 }
 function fmtPrecio(precio: number, moneda: string) {
-  return moneda === 'ARS' ? fmtARS(precio) : fmtUSD(precio)
+  return moneda === 'ARS'
+    ? new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(precio)
+    : fmtUSD(precio)
 }
 
-interface Perfil {
-  perfil: 'conservador' | 'moderado' | 'arriesgado'
-  objetivo: string
-  capital_disponible: number | null
+interface Portafolio {
+  id: number
+  tipo: 'conservador' | 'pasivo' | 'crecimiento' | 'oportunista'
+  nombre_personalizado: string | null
+  nombre_sugerido: string | null
+  capital_usd: number | null
+  asignacion_rf_pct: number | null
+  objetivo: string | null
 }
 
 interface Activo {
@@ -34,27 +37,26 @@ interface Activo {
 
 interface Recomendacion {
   id: number
-  accion: 'comprar' | 'vender' | 'mantener'
+  accion: 'comprar' | 'vender'
   razon: string
-  precio_recomendacion: number
-  rsi_momento: number | null
+  rsi_en_momento: number | null
   confianza: number
   estado: string
   generado_at: string
-  activos: { codigo: string; nombre: string; tipo: string; moneda: string }
+  portafolio_id: number
+  activos: { codigo: string; nombre: string; tipo: string; moneda: string } | null
+  portafolios: { nombre_personalizado: string | null; nombre_sugerido: string | null; tipo: string } | null
 }
 
 interface Decision {
   id: number
   accion: string
-  monto: number | null
-  ganancia_pct: number | null
   resultado: string
-  fecha_decision: string
+  creado_at: string
   recomendaciones: {
     accion: string
-    activos: { codigo: string; nombre: string }
-  }
+    activos: { codigo: string; nombre: string } | null
+  } | null
 }
 
 interface Stats {
@@ -64,10 +66,18 @@ interface Stats {
   winrate: number | null
 }
 
-const PERFIL_LABELS: Record<string, string> = {
-  conservador: '🛡️ Conservador',
-  moderado: '⚖️ Moderado',
-  arriesgado: '🚀 Arriesgado',
+const TIPO_EMOJI: Record<string, string> = {
+  conservador: '🛡️',
+  pasivo: '💰',
+  crecimiento: '📈',
+  oportunista: '🎯',
+}
+
+const TIPO_LABEL: Record<string, string> = {
+  conservador: 'Conservador',
+  pasivo: 'Pasivo',
+  crecimiento: 'Crecimiento',
+  oportunista: 'Oportunista',
 }
 
 const RSI_COLOR = (rsi: number | null) => {
@@ -84,20 +94,13 @@ const TENDENCIA_EMOJI: Record<string, string> = {
 }
 
 export default function InversionesTab() {
-  const [perfil, setPerfil] = useState<Perfil | null | undefined>(undefined)
+  const [portafolios, setPortafolios] = useState<Portafolio[]>([])
   const [activos, setActivos] = useState<Activo[]>([])
   const [recomendaciones, setRecomendaciones] = useState<Recomendacion[]>([])
   const [decisiones, setDecisiones] = useState<Decision[]>([])
   const [stats, setStats] = useState<Stats | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-
-  // Formulario de perfil
-  const [editandoPerfil, setEditandoPerfil] = useState(false)
-  const [formPerfil, setFormPerfil] = useState({ perfil: 'moderado', objetivo: '', capital: '' })
-  const [savingPerfil, setSavingPerfil] = useState(false)
-
-  // Decidir recomendación
   const [decidiendo, setDecidiendo] = useState<number | null>(null)
 
   const fetchData = useCallback(async () => {
@@ -105,30 +108,21 @@ export default function InversionesTab() {
     setError(null)
     try {
       const [pRes, aRes, rRes, dRes] = await Promise.all([
-        fetchWithAuth('/api/inversiones?resource=perfil'),
+        fetchWithAuth('/api/inversiones?resource=portafolios'),
         fetchWithAuth('/api/inversiones?resource=activos'),
         fetchWithAuth('/api/inversiones?resource=recomendaciones&estado=pendiente&limit=10'),
         fetchWithAuth('/api/inversiones?resource=decisiones'),
       ])
 
-      // Chequear errores HTTP antes de parsear JSON
-      if (!pRes.ok) {
-        const body = await pRes.text()
-        let msg = `Perfil: ${pRes.status}`
-        try { msg = JSON.parse(body).error || msg } catch { /* noop */ }
-        throw new Error(msg)
-      }
-      if (!aRes.ok || !rRes.ok || !dRes.ok) {
-        throw new Error(`API error: ${[aRes, rRes, dRes].map(r => r.status).join('/')}`)
+      if (!pRes.ok || !aRes.ok || !rRes.ok || !dRes.ok) {
+        throw new Error(`API error: ${[pRes, aRes, rRes, dRes].map(r => r.status).join('/')}`)
       }
 
       const [pData, aData, rData, dData] = await Promise.all([
         pRes.json(), aRes.json(), rRes.json(), dRes.json(),
       ])
 
-      // pData vacío ({}) = sin perfil configurado
-      const hasProfile = pData && !pData.error && Object.keys(pData).length > 0 && pData.perfil
-      setPerfil(hasProfile ? pData : null)
+      setPortafolios(Array.isArray(pData) ? pData : [])
       setActivos(Array.isArray(aData) ? aData : [])
       setRecomendaciones(Array.isArray(rData) ? rData : [])
       setDecisiones(Array.isArray(dData?.decisiones) ? dData.decisiones : [])
@@ -141,23 +135,6 @@ export default function InversionesTab() {
   }, [])
 
   useEffect(() => { fetchData() }, [fetchData])
-
-  async function guardarPerfil() {
-    setSavingPerfil(true)
-    await fetchWithAuth('/api/inversiones', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        resource: 'perfil',
-        perfil: formPerfil.perfil,
-        objetivo: formPerfil.objetivo || null,
-        capital_disponible: formPerfil.capital ? parseFloat(formPerfil.capital) : null,
-      }),
-    })
-    setSavingPerfil(false)
-    setEditandoPerfil(false)
-    fetchData()
-  }
 
   async function decidir(recId: number, accion: 'aceptada' | 'rechazada') {
     setDecidiendo(recId)
@@ -173,88 +150,52 @@ export default function InversionesTab() {
   if (loading) return <div className="loading">Cargando inversiones...</div>
   if (error) return <div className="error-banner">{error} <button className="btn-ghost" onClick={fetchData}>Reintentar</button></div>
 
-  // Sin perfil → formulario de setup
-  if (perfil === null || editandoPerfil) {
+  if (portafolios.length === 0) {
     return (
       <div className="tab-content">
         <div className="section-header">
-          <h2 className="section-title">📈 Configurar perfil de inversión</h2>
-          {editandoPerfil && (
-            <button className="btn-ghost" onClick={() => setEditandoPerfil(false)}>Cancelar</button>
-          )}
+          <h2 className="section-title">📈 Inversiones</h2>
         </div>
-        <div className="widget-box" style={{ maxWidth: 500 }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <div>
-              <label className="form-label">Perfil de riesgo</label>
-              <select
-                className="form-input"
-                value={formPerfil.perfil}
-                onChange={e => setFormPerfil(f => ({ ...f, perfil: e.target.value }))}
-              >
-                <option value="conservador">🛡️ Conservador — preservar capital</option>
-                <option value="moderado">⚖️ Moderado — balance rendimiento/riesgo</option>
-                <option value="arriesgado">🚀 Arriesgado — máximo rendimiento</option>
-              </select>
-            </div>
-            <div>
-              <label className="form-label">Objetivo (opcional)</label>
-              <input
-                className="form-input"
-                placeholder="ej: ahorro largo plazo, generar pasivos..."
-                value={formPerfil.objetivo}
-                onChange={e => setFormPerfil(f => ({ ...f, objetivo: e.target.value }))}
-              />
-            </div>
-            <div>
-              <label className="form-label">Capital disponible en ARS (opcional)</label>
-              <input
-                className="form-input"
-                type="number"
-                placeholder="ej: 500000"
-                value={formPerfil.capital}
-                onChange={e => setFormPerfil(f => ({ ...f, capital: e.target.value }))}
-              />
-            </div>
-            <button
-              className="btn-primary"
-              onClick={guardarPerfil}
-              disabled={savingPerfil}
-            >
-              {savingPerfil ? 'Guardando...' : 'Guardar perfil'}
-            </button>
-          </div>
+        <div className="widget-box" style={{ textAlign: 'center', padding: '32px 24px' }}>
+          <p style={{ fontSize: 16, marginBottom: 8 }}>No tenés portafolios configurados aún.</p>
+          <p style={{ color: 'var(--fg3)', fontSize: 14 }}>
+            Enviá <strong>/portafolio_nuevo</strong> por Telegram para crear tu primer portafolio de inversión.
+          </p>
         </div>
-        <p style={{ fontSize: 13, color: 'var(--fg3)', marginTop: 12 }}>
-          Una vez configurado, el sistema comenzará a analizar activos y enviarte recomendaciones por Telegram cada 30 minutos cuando detecte señales.
-        </p>
       </div>
     )
   }
 
   return (
     <div className="tab-content">
-      {/* Stats + perfil */}
       <div className="section-header">
         <h2 className="section-title">📈 Inversiones</h2>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <span style={{ fontSize: 13, color: 'var(--fg2)' }}>
-            {perfil && PERFIL_LABELS[perfil.perfil]}
-            {perfil?.capital_disponible ? ` · ${fmtARS(perfil.capital_disponible)}` : ''}
-          </span>
-          <button className="btn-ghost" onClick={() => {
-            if (!perfil) return
-            setFormPerfil({ perfil: perfil.perfil, objetivo: perfil.objetivo ?? '', capital: String(perfil.capital_disponible ?? '') })
-            setEditandoPerfil(true)
-          }}>Editar</button>
-        </div>
       </div>
 
-      {/* Cards de stats */}
+      {/* Portafolios */}
+      <div className="cards" style={{ gridTemplateColumns: `repeat(${Math.min(portafolios.length, 2)}, 1fr)` }}>
+        {portafolios.map(p => {
+          const nombre = p.nombre_personalizado || p.nombre_sugerido || TIPO_LABEL[p.tipo]
+          return (
+            <div key={p.id} className="card">
+              <p className="card-label">{TIPO_EMOJI[p.tipo]} {TIPO_LABEL[p.tipo]}</p>
+              <p className="card-value" style={{ fontSize: 18 }}>{nombre}</p>
+              <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--fg3)' }}>
+                {p.capital_usd ? fmtUSD(p.capital_usd) : '—'} · RF {p.asignacion_rf_pct ?? '—'}%
+              </p>
+              {p.objetivo && (
+                <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--fg3)' }}>{p.objetivo}</p>
+              )}
+            </div>
+          )
+        })}
+      </div>
+
+      {/* Stats */}
       <div className="cards" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
         <div className="card">
           <p className="card-label">Winrate</p>
-          <p className="card-value" style={{ color: stats?.winrate && stats.winrate >= 50 ? '#22c55e' : '#ef4444' }}>
+          <p className="card-value" style={{ color: stats?.winrate != null && stats.winrate >= 50 ? '#22c55e' : '#ef4444' }}>
             {stats?.winrate != null ? `${stats.winrate}%` : '—'}
           </p>
           <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--fg3)' }}>
@@ -262,7 +203,7 @@ export default function InversionesTab() {
           </p>
         </div>
         <div className="card">
-          <p className="card-label">Decisiones totales</p>
+          <p className="card-label">Decisiones</p>
           <p className="card-value">{stats?.total ?? 0}</p>
         </div>
         <div className="card">
@@ -277,8 +218,9 @@ export default function InversionesTab() {
           <h3 className="widget-title">⏳ Recomendaciones pendientes</h3>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             {recomendaciones.map(rec => {
-              const accionColor = rec.accion === 'comprar' ? '#22c55e' : rec.accion === 'vender' ? '#ef4444' : '#f59e0b'
-              const accionEmoji = rec.accion === 'comprar' ? '🟢' : rec.accion === 'vender' ? '🔴' : '🟡'
+              const accionColor = rec.accion === 'comprar' ? '#22c55e' : '#ef4444'
+              const accionEmoji = rec.accion === 'comprar' ? '🟢' : '🔴'
+              const portNombre = rec.portafolios?.nombre_personalizado || rec.portafolios?.nombre_sugerido || TIPO_LABEL[rec.portafolios?.tipo ?? ''] || '—'
               return (
                 <div key={rec.id} style={{ border: '1px solid var(--border)', borderRadius: 10, padding: '14px 16px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
@@ -294,8 +236,8 @@ export default function InversionesTab() {
                       </div>
                       <p style={{ margin: 0, fontSize: 13, color: 'var(--fg2)', lineHeight: 1.5 }}>{rec.razon}</p>
                       <div style={{ marginTop: 8, fontSize: 12, color: 'var(--fg3)', display: 'flex', gap: 12 }}>
-                        <span>Precio: {fmtPrecio(rec.precio_recomendacion, rec.activos?.moneda)}</span>
-                        {rec.rsi_momento && <span>RSI: {rec.rsi_momento}</span>}
+                        {rec.rsi_en_momento != null && <span>RSI: {rec.rsi_en_momento}</span>}
+                        <span>{portNombre}</span>
                         <span>{new Date(rec.generado_at).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}</span>
                       </div>
                     </div>
@@ -392,16 +334,11 @@ export default function InversionesTab() {
                 <div key={d.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 0', borderBottom: '1px solid var(--border)', fontSize: 14 }}>
                   <span style={{ width: 22, textAlign: 'center' }}>{d.accion === 'aceptada' ? '✅' : '❌'}</span>
                   <span style={{ flex: 1 }}>{nombre} — {accionRec}</span>
-                  {d.ganancia_pct != null && (
-                    <span style={{ color: d.ganancia_pct >= 0 ? '#22c55e' : '#ef4444', fontWeight: 600 }}>
-                      {d.ganancia_pct >= 0 ? '+' : ''}{d.ganancia_pct}%
-                    </span>
-                  )}
                   <span style={{ color: resultadoColor, fontSize: 12, whiteSpace: 'nowrap' }}>
                     {resultadoLabel[d.resultado] ?? d.resultado}
                   </span>
                   <span style={{ fontSize: 12, color: 'var(--fg3)', whiteSpace: 'nowrap' }}>
-                    {new Date(d.fecha_decision).toLocaleDateString('es-AR')}
+                    {new Date(d.creado_at).toLocaleDateString('es-AR')}
                   </span>
                 </div>
               )

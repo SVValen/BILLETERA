@@ -19,8 +19,28 @@ def parse_recurrente(text: str) -> int | None:
     return None
 
 
+def parse_cuota_progreso(text: str) -> tuple[int, int] | None:
+    """Detecta cuotas en progreso. Retorna (cuota_actual, total_cuotas) o None.
+    Ejemplos: 'cuota 3/12', '3/12 cuotas', 'cuota 3 de 12'."""
+    t = text.lower()
+    patterns = [
+        r"cuota\s+(\d+)\s*/\s*(\d+)",
+        r"(\d+)\s*/\s*(\d+)\s+cuotas?",
+        r"cuota\s+(\d+)\s+de\s+(\d+)",
+    ]
+    for p in patterns:
+        m = re.search(p, t)
+        if m:
+            actual, total = int(m.group(1)), int(m.group(2))
+            if 1 <= actual <= total and total > 1:
+                return actual, total
+    return None
+
+
 def parse_cuotas(text: str) -> int | None:
     """Detecta si el texto menciona cuotas. Retorna el número de cuotas."""
+    if parse_cuota_progreso(text):
+        return None
     m = re.search(r"(?:en\s+)?(\d+)\s*cuotas?\b", text.lower())
     if m:
         n = int(m.group(1))
@@ -39,7 +59,10 @@ def strip_recurrente(text: str) -> str:
 
 def strip_cuotas(text: str) -> str:
     """Elimina la mención de cuotas del texto para parsear monto/descripción limpio."""
-    cleaned = re.sub(r"(?:en\s+)?\d+\s*cuotas?\b", "", text, flags=re.IGNORECASE)
+    cleaned = re.sub(r"cuota\s+\d+\s*/\s*\d+", "", text, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\d+\s*/\s*\d+\s+cuotas?", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"cuota\s+\d+\s+de\s+\d+", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"(?:en\s+)?\d+\s*cuotas?\b", "", cleaned, flags=re.IGNORECASE)
     return re.sub(r"\s{2,}", " ", cleaned).strip()
 
 

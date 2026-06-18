@@ -1,7 +1,7 @@
 import re
 from datetime import date
 from lib.supabase_client import get_supabase
-from lib.parser import parse_movement, parse_recurrente, parse_cuotas, strip_recurrente, strip_cuotas
+from lib.parser import parse_movement, parse_recurrente, parse_cuotas, parse_cuota_progreso, strip_recurrente, strip_cuotas
 from ..tg import _send, _get_dolar_oficial
 from ..keyboards import _monto_keyboard, _category_keyboard
 from ..helpers import _detect_currency, _categorize, _save_learned_keywords
@@ -95,11 +95,12 @@ async def _process_text(text: str, user_id: str, chat_id: int, token: str) -> No
         supabase.table("movimientos").update({"estado": "confirmado"}).eq("id", mov["id"]).execute()
 
     dia_mes = parse_recurrente(text)
+    cuota_progreso = parse_cuota_progreso(text)
     num_cuotas = parse_cuotas(text)
 
     if dia_mes:
         clean = strip_recurrente(text)
-    elif num_cuotas:
+    elif cuota_progreso or num_cuotas:
         clean = strip_cuotas(text)
     else:
         clean = text
@@ -122,7 +123,13 @@ async def _process_text(text: str, user_id: str, chat_id: int, token: str) -> No
         await _registrar_recurrente(text, monto, descripcion, tipo, dia_mes, user_id, chat_id, token)
         return
 
-    # ── Compra en cuotas ──
+    # ── Compra en cuotas en progreso (ej: "cuota 3/12") ──
+    if cuota_progreso and tipo == "gasto":
+        cuota_actual, total = cuota_progreso
+        await _registrar_cuota_plan(text, monto, descripcion, tipo, total, user_id, chat_id, token, cuota_actual=cuota_actual)
+        return
+
+    # ── Compra en cuotas desde el inicio ──
     if num_cuotas and tipo == "gasto":
         await _registrar_cuota_plan(text, monto, descripcion, tipo, num_cuotas, user_id, chat_id, token)
         return

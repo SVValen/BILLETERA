@@ -78,7 +78,7 @@ def generar_recomendacion(
 PERFIL DEL USUARIO:
 - Tipo: {perfil.get("perfil", "moderado")} — {perfil_desc}
 - Objetivos: {objetivos_txt}
-- Capital disponible: {perfil.get("capital_disponible", "no especificado")}
+- Capital USD: {perfil.get("capital_usd", "no especificado")}
 - Winrate histórico: {winrate_txt}
 
 ACTIVO:

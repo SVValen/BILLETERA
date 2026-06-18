@@ -20,7 +20,7 @@ async def handle_recomendacion_callback(
                 "portafolio_id": rec["portafolio_id"],
                 "recomendacion_id": rec_id,
                 "accion": "aceptada",
-                "precio_entrada": rec.get("precio_recomendacion"),
+                "precio_en_decision": rec.get("precio_en_decision"),
             }).execute()
             if token:
                 await _answer_callback(callback_id, token)

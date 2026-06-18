@@ -17,18 +17,21 @@ async def _create_cuota_movimientos(plan_id: int, primer_fecha: date, token: str
     if not plan.data:
         return
     p = plan.data
+    cuota_inicio = p.get("cuota_inicio", 1)
+    remaining = p["num_cuotas"] - cuota_inicio + 1
+
     movimientos = [
         {
             "usuario_id": p["usuario_id"],
             "fecha": add_months(primer_fecha, i).isoformat(),
-            "descripcion": f"{p['descripcion']} (cuota {i + 1}/{p['num_cuotas']})",
+            "descripcion": f"{p['descripcion']} (cuota {cuota_inicio + i}/{p['num_cuotas']})",
             "monto": p["monto_cuota"],
             "categoria_id": p["categoria_id"],
             "tipo": "gasto",
             "origen": "telegram",
             "estado": "confirmado",
         }
-        for i in range(p["num_cuotas"])
+        for i in range(remaining)
     ]
     supabase.table("movimientos").insert(movimientos).execute()
     supabase.table("cuotas_plan").update(
@@ -36,19 +39,26 @@ async def _create_cuota_movimientos(plan_id: int, primer_fecha: date, token: str
     ).eq("id", plan_id).execute()
 
     chat_id = int(p["usuario_id"])
-    ultima = add_months(primer_fecha, p["num_cuotas"] - 1)
-    await _send(
-        chat_id,
-        f"✅ *{p['descripcion']}* en {p['num_cuotas']} cuotas\n"
-        f"💳 ${p['monto_cuota']:,.0f}/mes · primera: {primer_fecha.strftime('%d/%m/%Y')}\n"
-        f"📆 Última cuota: {ultima.strftime('%m/%Y')}",
-        token,
-    )
+    ultima = add_months(primer_fecha, remaining - 1)
+    if cuota_inicio > 1:
+        msg = (
+            f"✅ *{p['descripcion']}* — registrando cuota {cuota_inicio}/{p['num_cuotas']} en adelante\n"
+            f"💳 ${p['monto_cuota']:,.0f}/mes · desde: {primer_fecha.strftime('%m/%Y')}\n"
+            f"📆 Última cuota: {ultima.strftime('%m/%Y')}"
+        )
+    else:
+        msg = (
+            f"✅ *{p['descripcion']}* en {p['num_cuotas']} cuotas\n"
+            f"💳 ${p['monto_cuota']:,.0f}/mes · primera: {primer_fecha.strftime('%d/%m/%Y')}\n"
+            f"📆 Última cuota: {ultima.strftime('%m/%Y')}"
+        )
+    await _send(chat_id, msg, token)
 
 
 async def _registrar_cuota_plan(
     text: str, monto: float, descripcion: str, tipo: str,
-    num_cuotas: int, user_id: str, chat_id: int, token: str
+    num_cuotas: int, user_id: str, chat_id: int, token: str,
+    cuota_actual: int = 1,
 ) -> None:
     moneda = _detect_currency(text)
     if moneda == "USD":
@@ -69,12 +79,20 @@ async def _registrar_cuota_plan(
         "monto_total": monto,
         "monto_cuota": monto_cuota,
         "num_cuotas": num_cuotas,
+        "cuota_inicio": cuota_actual,
         "categoria_id": categoria_id,
     }).execute()
     plan_id = result.data[0]["id"] if result.data else None
     if not plan_id:
         await _send(chat_id, "Error guardando el plan 😕", token, parse_mode="")
         return
-    await _send(chat_id,
-        f"💳 *{descripcion}* en {num_cuotas} cuotas de *${monto_cuota:,.0f}*\n¿Primera cuota?",
-        token, reply_markup=_cuota_fecha_keyboard(plan_id))
+
+    if cuota_actual > 1:
+        prompt = (
+            f"💳 *{descripcion}* — {num_cuotas} cuotas de *${monto_cuota:,.0f}*\n"
+            f"¿Cuándo cae la cuota {cuota_actual}/{num_cuotas}?"
+        )
+    else:
+        prompt = f"💳 *{descripcion}* en {num_cuotas} cuotas de *${monto_cuota:,.0f}*\n¿Primera cuota?"
+
+    await _send(chat_id, prompt, token, reply_markup=_cuota_fecha_keyboard(plan_id))

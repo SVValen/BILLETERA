@@ -61,13 +61,13 @@ def analizar_carry_trade(
 def evaluar_vencimientos(posiciones: list[dict], dias_alerta: int = 3) -> list[dict]:
     """
     Retorna posiciones que vencen en <= dias_alerta días.
-    posiciones: lista de dicts con fecha_vencimiento (str ISO o date) y estado='activa'
+    posiciones: lista de dicts con fecha_vencimiento (str ISO o date) y estado='abierta'
     """
     hoy = date.today()
     proximas = []
 
     for p in posiciones:
-        if p.get("estado") != "activa":
+        if p.get("estado") != "abierta":
             continue
         venc = p.get("fecha_vencimiento")
         if not venc:
@@ -91,7 +91,7 @@ def calcular_rendimiento_usd(
     dolar_mep_actual: float,
 ) -> dict:
     """
-    Calcula el P&L en USD de una posición activa o vencida.
+    Calcula el P&L en USD de una posición abierta o vencida.
 
     Retorna:
         {rendimiento_ars_pct, rendimiento_usd, rendimiento_usd_pct}
@@ -162,7 +162,7 @@ def calcular_allocation(
     total_ars_rf = sum(
         p.get("monto_ars", 0)
         for p in posiciones_rf
-        if p.get("estado") == "activa"
+        if p.get("estado") == "abierta"
     )
     total_usd_rf = total_ars_rf / dolar_mep_actual if dolar_mep_actual > 0 else 0
     total_usd_libre = max(0, capital_usd - total_usd_rf)

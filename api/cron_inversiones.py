@@ -226,8 +226,7 @@ async def cron_inversiones(request: Request, job: str = ""):
                 "activo_id": activo_id,
                 "accion": rec["accion"],
                 "razon": rec["razon"],
-                "precio_recomendacion": activo.get("precio_actual") or activo.get("precio_ars"),
-                "rsi_momento": rsi,
+                "rsi_en_momento": rsi,
                 "confianza": rec["confianza"],
                 "estado": "pendiente",
             }).execute()
@@ -263,7 +262,7 @@ async def _job_outcomes(request: Request) -> JSONResponse:
 
     r = (
         supabase.table("decisiones_inversion")
-        .select("id, recomendacion_id, precio_entrada, recomendaciones(activo_id)")
+        .select("id, recomendacion_id, precio_en_decision, recomendaciones(activo_id)")
         .eq("accion", "aceptada")
         .eq("resultado", "pendiente")
         .execute()
@@ -280,17 +279,16 @@ async def _job_outcomes(request: Request) -> JSONResponse:
             continue
 
         precio_actual = activo_r.data[0].get("precio_actual") or activo_r.data[0].get("precio_ars")
-        precio_entrada = dec.get("precio_entrada")
+        precio_decision = dec.get("precio_en_decision")
 
-        if not precio_actual or not precio_entrada:
+        if not precio_actual or not precio_decision:
             continue
 
-        ganancia_pct = round((float(precio_actual) - float(precio_entrada)) / float(precio_entrada) * 100, 2)
+        ganancia_pct = round((float(precio_actual) - float(precio_decision)) / float(precio_decision) * 100, 2)
         resultado = "exitoso" if ganancia_pct > 2 else "fallido" if ganancia_pct < -2 else "neutral"
 
         supabase.table("decisiones_inversion").update({
-            "precio_7d": precio_actual,
-            "ganancia_pct": ganancia_pct,
+            "precio_7_dias": precio_actual,
             "resultado": resultado,
         }).eq("id", dec["id"]).execute()
         actualizados += 1

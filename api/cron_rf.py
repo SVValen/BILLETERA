@@ -97,7 +97,7 @@ async def _procesar_usuario(usuario_id: str, perfil: dict, supabase, dolar_mep: 
     mensajes = []
 
     # Posiciones activas
-    pos_r = supabase.table("posiciones_rf").select("*").eq("usuario_id", usuario_id).eq("estado", "activa").execute()
+    pos_r = supabase.table("posiciones_rf").select("*").eq("usuario_id", usuario_id).eq("estado", "abierta").execute()
     posiciones = pos_r.data or []
 
     # 1. Alertas de vencimiento (siempre enviar)

@@ -35,12 +35,14 @@ async def get_cuotas(request: Request):
     for p in (rows.data or []):
         primera = date.fromisoformat(p["fecha_primera_cuota"])
         n = p["num_cuotas"]
+        cuota_inicio = p.get("cuota_inicio", 1)
 
-        meses_transcurridos = (hoy.year - primera.year) * 12 + (hoy.month - primera.month)
-        pagadas = min(meses_transcurridos + 1, n)
+        # primera es la fecha de cuota_inicio, no necesariamente cuota 1
+        meses_desde_inicio = (hoy.year - primera.year) * 12 + (hoy.month - primera.month)
+        pagadas = min(cuota_inicio - 1 + meses_desde_inicio + 1, n)
         restantes = n - pagadas
 
-        prox = add_months(primera, pagadas) if restantes > 0 else None
+        prox = add_months(primera, meses_desde_inicio + 1) if restantes > 0 else None
 
         cat = p.get("categorias") or {}
         result.append({
