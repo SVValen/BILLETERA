@@ -122,11 +122,15 @@ async def _ya_tiene_recomendacion_pendiente(usuario_id: str, activo_id: int, sup
 
 @app.get("/api/cron_inversiones")
 @app.get("/")
-async def cron_inversiones(request: Request):
+async def cron_inversiones(request: Request, job: str = ""):
     # Validar CRON_SECRET
     cron_secret = os.getenv("CRON_SECRET", "")
     if cron_secret and request.headers.get("authorization") != f"Bearer {cron_secret}":
         return JSONResponse({"error": "unauthorized"}, status_code=401)
+
+    # Despachar jobs alternativos via ?job=
+    if job == "outcomes":
+        return await _job_outcomes(request)
 
     supabase = get_supabase()
 
@@ -253,52 +257,10 @@ async def cron_inversiones(request: Request):
     })
 
 
-@app.get("/api/cron_inversiones/debug_market")
-@app.get("/debug_market")
-async def debug_market(request: Request, simbolo: str = "AAPL"):
-    """
-    Endpoint de diagnóstico: testea las 3 fuentes de precios.
-    Útil para verificar que BTC/dolar/IOL respondan correctamente.
-    No requiere CRON_SECRET (solo info de mercado público).
-    """
-    from lib.market_data import fetch_coingecko_precio, fetch_dolar_precio, fetch_iol_debug
-
-    btc = await fetch_coingecko_precio("BTCUSDT")
-    eth = await fetch_coingecko_precio("ETHUSDT")
-
-    dolar_oficial = await fetch_dolar_precio("oficial")
-    dolar_blue = await fetch_dolar_precio("blue")
-    dolar_cripto = await fetch_dolar_precio("cripto")
-
-    iol = await fetch_iol_debug(simbolo)
-
-    return JSONResponse({
-        "coingecko": {
-            "BTC": btc,
-            "ETH": eth,
-        },
-        "dolarapi": {
-            "oficial": dolar_oficial,
-            "blue": dolar_blue,
-            "cripto": dolar_cripto,
-        },
-        "iol": iol,
-    })
-
-
-@app.get("/api/cron_inversiones/outcomes")
-async def actualizar_outcomes(request: Request):
-    """
-    Job diario: actualiza el resultado de decisiones aceptadas
-    comparando precio de entrada vs precio actual.
-    """
-    cron_secret = os.getenv("CRON_SECRET", "")
-    if cron_secret and request.headers.get("authorization") != f"Bearer {cron_secret}":
-        return JSONResponse({"error": "unauthorized"}, status_code=401)
-
+async def _job_outcomes(request: Request) -> JSONResponse:
+    """Job diario: actualiza resultado de decisiones aceptadas comparando precio entrada vs actual."""
     supabase = get_supabase()
 
-    # Decisiones aceptadas con resultado pendiente
     r = (
         supabase.table("decisiones_inversion")
         .select("id, recomendacion_id, precio_entrada, recomendaciones(activo_id)")
@@ -309,7 +271,10 @@ async def actualizar_outcomes(request: Request):
 
     actualizados = 0
     for dec in (r.data or []):
-        activo_id = dec["recomendaciones"]["activo_id"]
+        activo_id = (dec.get("recomendaciones") or {}).get("activo_id")
+        if not activo_id:
+            continue
+
         activo_r = supabase.table("activos").select("precio_actual, precio_ars").eq("id", activo_id).limit(1).execute()
         if not activo_r.data:
             continue
@@ -320,7 +285,7 @@ async def actualizar_outcomes(request: Request):
         if not precio_actual or not precio_entrada:
             continue
 
-        ganancia_pct = round((precio_actual - precio_entrada) / precio_entrada * 100, 2)
+        ganancia_pct = round((float(precio_actual) - float(precio_entrada)) / float(precio_entrada) * 100, 2)
         resultado = "exitoso" if ganancia_pct > 2 else "fallido" if ganancia_pct < -2 else "neutral"
 
         supabase.table("decisiones_inversion").update({
