@@ -17,7 +17,7 @@ function fmt(n: number) {
   return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(n)
 }
 
-function fmtK(v: number | string | undefined) {
+function fmtK(v: number | string | undefined | null) {
   const n = typeof v === 'number' ? v : 0
   return n >= 1_000_000
     ? `$${(n / 1_000_000).toFixed(1)}M`
@@ -185,8 +185,8 @@ export default function ResumenTab({ mes }: { mes: string }) {
               <XAxis dataKey="name" tick={{ fontSize: 12 }} />
               <YAxis tickFormatter={fmtK} tick={{ fontSize: 11 }} width={52} />
               <Tooltip formatter={(v) => fmt(v as number)} />
-              <Bar dataKey="Gastos" fill="#ef4444" radius={[6, 6, 0, 0]} label={{ position: 'top', formatter: fmtK, fontSize: 11, fill: 'var(--fg2)' }} />
-              <Bar dataKey="Ingresos" fill="#22c55e" radius={[6, 6, 0, 0]} label={{ position: 'top', formatter: fmtK, fontSize: 11, fill: 'var(--fg2)' }} />
+              <Bar dataKey="Gastos" fill="#ef4444" radius={[6, 6, 0, 0]} label={{ position: 'top', formatter: (v: any) => fmtK(v), fontSize: 11, fill: 'var(--fg2)' }} />
+              <Bar dataKey="Ingresos" fill="#22c55e" radius={[6, 6, 0, 0]} label={{ position: 'top', formatter: (v: any) => fmtK(v), fontSize: 11, fill: 'var(--fg2)' }} />
             </BarChart>
           </ResponsiveContainer>
         </div>
