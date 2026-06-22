@@ -192,6 +192,7 @@ async def _process_text(text: str, user_id: str, chat_id: int, token: str) -> No
             await _save_pending_tarjeta(
                 chat_id=chat_id, token=token, user_id=user_id,
                 descripcion=descripcion, monto=monto, tipo=tipo,
+                tarjetas=tarjetas,
             )
             return
 
