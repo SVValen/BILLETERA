@@ -54,6 +54,15 @@ AYUDA = (
     "  `/colchon_nuevo` — crear portafolio para cubrir resúmenes\n"
     "  `/colchon` — ver estado del mes (cuotas + tope variable + invertido)\n\n"
 
+    "🏦 *Préstamos:*\n"
+    "  `/prestamos` — ver estado del préstamo y pagar cuotas\n"
+    "  _Al pagar, te ofrezco adelantar cuotas (Capital × 1.25)._\n\n"
+
+    "🎯 *Objetivos de ahorro:*\n"
+    "  `/objetivos` — ver tus objetivos y progreso\n"
+    "  `/objetivo_nuevo Nombre | monto | YYYY-MM` — crear objetivo\n"
+    "  `/objetivo_conectar` — vincular objetivo a portafolio existente\n\n"
+
     "📋 *Otros comandos:*\n"
     "  `/presupuesto` — ver estado de tus presupuestos\n"
     "  `/presupuesto comida 20000` — fijar presupuesto mensual\n"

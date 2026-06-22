@@ -142,6 +142,31 @@ async def handle_rf_callback(
                 "tna_contratada": datos.get("tna_contratada"),
                 "fecha_vencimiento": datos.get("fecha_vencimiento"),
             }).execute()
+            # Parte B: movimiento gasto Inversiones + actualizar objetivo
+            from datetime import date as _date
+            try:
+                port_r2 = supabase.table("portafolios").select("nombre_personalizado, nombre_sugerido").eq("id", datos["portafolio_id"]).limit(1).execute()
+                port_nombre2 = "Portafolio"
+                if port_r2.data:
+                    port_nombre2 = port_r2.data[0].get("nombre_personalizado") or port_r2.data[0].get("nombre_sugerido") or "Portafolio"
+                supabase.table("movimientos").insert({
+                    "usuario_id": user_id,
+                    "fecha": _date.today().isoformat(),
+                    "descripcion": f"Inversión — {port_nombre2}",
+                    "monto": datos["monto_ars"],
+                    "categoria_id": 14,
+                    "tipo": "gasto",
+                    "origen": "telegram",
+                    "estado": "confirmado",
+                }).execute()
+                obj_r2 = supabase.table("objetivos_ahorro").select("id, monto_actual").eq("portafolio_id", datos["portafolio_id"]).eq("activo", True).limit(1).execute()
+                if obj_r2.data:
+                    obj2 = obj_r2.data[0]
+                    supabase.table("objetivos_ahorro").update({
+                        "monto_actual": float(obj2.get("monto_actual") or 0) + datos["monto_ars"]
+                    }).eq("id", obj2["id"]).execute()
+            except Exception:
+                pass  # no bloquear el flujo principal
             if token:
                 await _answer_callback(callback_id, token)
                 await _edit_message(chat_id, message_id,

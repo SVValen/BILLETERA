@@ -16,6 +16,8 @@ from .handlers.aportes import handle_aporte, handle_aporte_callback
 from .handlers.activos_rv import handle_rv_callback, handle_activos_cmd
 from .handlers.tarjetas import handle_tarjeta_nueva_cmd, handle_tarjetas_cmd, handle_tarjeta_callback
 from .handlers.colchon import handle_colchon_cmd, handle_colchon_nuevo_cmd, handle_colchon_callback, handle_colchon_text
+from .handlers.prestamos import handle_prestamo_callback, handle_prestamos_cmd, detect_prestamo_text
+from .handlers.objetivos import handle_objetivo_nuevo_cmd, handle_objetivos_cmd, handle_objetivo_conectar_cmd, handle_objetivo_callback
 from lib.parser import parse_aporte
 from .middleware_portafolio import resolver_portafolio, handle_psel_callback
 
@@ -48,6 +50,10 @@ async def dispatch_callback(cq: dict, token: str) -> None:
     if await handle_tarjeta_callback(parts, callback_id, chat_id, message_id, user_id, supabase, token):
         return
     if await handle_colchon_callback(parts, callback_id, chat_id, message_id, user_id, supabase, token):
+        return
+    if await handle_prestamo_callback(parts, callback_id, chat_id, message_id, user_id, supabase, token):
+        return
+    if await handle_objetivo_callback(parts, callback_id, chat_id, message_id, user_id, supabase, token):
         return
 
 
@@ -316,6 +322,31 @@ async def dispatch_message(message: dict, token: str) -> None:
         if token:
             args = text[len("/presupuesto"):].strip()
             await _handle_presupuesto_cmd(user_id, chat_id, args, token)
+        return
+
+    if text.lower().startswith("/prestamos"):
+        if token:
+            await handle_prestamos_cmd(user_id, chat_id, token)
+        return
+
+    if text.lower().startswith("/objetivo_nuevo"):
+        if token:
+            await handle_objetivo_nuevo_cmd(text, user_id, chat_id, token)
+        return
+
+    if text.lower().startswith("/objetivo_conectar"):
+        if token:
+            await handle_objetivo_conectar_cmd(user_id, chat_id, token)
+        return
+
+    if text.lower().startswith("/objetivos"):
+        if token:
+            await handle_objetivos_cmd(user_id, chat_id, token)
+        return
+
+    # ── Detección de texto de préstamo por keywords ──
+    if token and detect_prestamo_text(text):
+        await handle_prestamos_cmd(user_id, chat_id, token)
         return
 
     # ── Parser de posiciones RF ──

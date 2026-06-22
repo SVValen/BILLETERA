@@ -220,6 +220,45 @@ async def _send_portafolio_creado(chat_id: int, token: str, portafolio: dict, no
         from .activos_rv import sugerir_activos_rv
         await sugerir_activos_rv(chat_id, token, portafolio)
 
+    # Parte B: vincular objetivo si estaba esperando
+    usuario_id = portafolio.get("usuario_id")
+    portafolio_id_actual = portafolio.get("id")
+    supabase_local = get_supabase()
+    obj_r = (
+        supabase_local.table("objetivos_ahorro")
+        .select("id, nombre")
+        .eq("usuario_id", str(usuario_id))
+        .eq("esperando_portafolio", True)
+        .eq("activo", True)
+        .limit(1)
+        .execute()
+    )
+    if obj_r.data:
+        obj = obj_r.data[0]
+        supabase_local.table("objetivos_ahorro").update({
+            "portafolio_id": portafolio_id_actual,
+            "esperando_portafolio": False,
+        }).eq("id", obj["id"]).execute()
+        await _send(chat_id, f"✅ Portafolio vinculado al objetivo *{obj['nombre']}*.", token)
+    else:
+        obj_unlinked = (
+            supabase_local.table("objetivos_ahorro")
+            .select("id")
+            .eq("usuario_id", str(usuario_id))
+            .eq("activo", True)
+            .is_("portafolio_id", "null")
+            .eq("esperando_portafolio", False)
+            .limit(1)
+            .execute()
+        )
+        if obj_unlinked.data:
+            await _send(chat_id, "¿Vinculás este portafolio a un objetivo de ahorro?", token,
+                reply_markup={"inline_keyboard": [[
+                    {"text": "🎯 Sí, vincular", "callback_data": f"obj_link:{portafolio_id_actual}"},
+                    {"text": "❌ No", "callback_data": "obj_nolink"},
+                ]]}
+            )
+
 
 async def _sugerir_instrumentos_rf(
     chat_id: int,
