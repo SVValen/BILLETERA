@@ -22,6 +22,18 @@ def _monto_keyboard(movement_id: int, monto: float) -> dict:
     ]]}
 
 
+def _cuotas_pago_keyboard(mov_id: int, tarjeta_id: int) -> dict:
+    p = f"tar_cuotas:{mov_id}:{tarjeta_id}"
+    return {"inline_keyboard": [
+        [{"text": "1 pago (sin cuotas)", "callback_data": f"{p}:1"}],
+        [
+            {"text": "3 cuotas", "callback_data": f"{p}:3"},
+            {"text": "6 cuotas", "callback_data": f"{p}:6"},
+            {"text": "12 cuotas", "callback_data": f"{p}:12"},
+        ],
+    ]}
+
+
 def _cuota_fecha_keyboard(plan_id: int) -> dict:
     return {"inline_keyboard": [[
         {"text": "📅 Este mes", "callback_data": f"cuota_fecha:{plan_id}:0"},

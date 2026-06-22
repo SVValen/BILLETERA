@@ -5,7 +5,7 @@ from lib.parser import categorize_from_keywords
 from lib.date_utils import add_months
 from lib.tarjetas import calcular_mes_resumen
 from ..tg import _send, _answer_callback, _edit_message
-from ..keyboards import _category_keyboard, _edit_submenu_keyboard, _del_confirm_keyboard, _monto_keyboard, _cuota_fecha_keyboard
+from ..keyboards import _category_keyboard, _edit_submenu_keyboard, _del_confirm_keyboard, _monto_keyboard, _cuota_fecha_keyboard, _cuotas_pago_keyboard
 from ..helpers import _save_learned_keywords
 from ..handlers.presupuestos import _check_presupuesto_alert
 from ..handlers.cuotas import _create_cuota_movimientos, _first_of_month
@@ -33,58 +33,139 @@ async def handle_movimiento_callback(
         updates: dict = {"fecha_compra": hoy.isoformat()}
 
         if tarjeta_key == "0":
-            # Efectivo: mes_resumen = mes de la compra
+            # Efectivo: mes_resumen = mes de la compra, finalizar directo
             updates["mes_resumen"] = hoy.strftime("%Y-%m")
+            monto = mov["monto"]
+            monto_bajo = monto < 1000
+            cat_id = mov.get("categoria_id", 7)
+            if monto_bajo:
+                updates["estado"] = "pendiente_confirmacion"
+                supabase.table("movimientos").update(updates).eq("id", mov_id).execute()
+                if token:
+                    await _answer_callback(callback_id, token)
+                    await _edit_message(chat_id, message_id,
+                        f"🤔 Registré *${monto:,.0f}* — ¿está bien o querías decir *${monto * 1000:,.0f}*?",
+                        token, reply_markup=_monto_keyboard(mov_id, monto))
+            elif cat_id == 7:
+                updates["estado"] = "pendiente_categoria"
+                supabase.table("movimientos").update(updates).eq("id", mov_id).execute()
+                if token:
+                    await _answer_callback(callback_id, token)
+                    await _edit_message(chat_id, message_id,
+                        f"📌 Guardé *${monto:,.0f}* — ¿en qué categoría va *{mov['descripcion']}*?",
+                        token)
+                    await _send(chat_id, "Elegí categoría:", token, parse_mode="",
+                                reply_markup=_category_keyboard(mov_id))
+            else:
+                updates["estado"] = "confirmado"
+                supabase.table("movimientos").update(updates).eq("id", mov_id).execute()
+                cat_row = supabase.table("categorias").select("nombre, emoji").eq("id", cat_id).single().execute()
+                cat_name = cat_row.data.get("nombre", "Otros") if cat_row.data else "Otros"
+                cat_emoji = cat_row.data.get("emoji", "📌") if cat_row.data else "📌"
+                if token:
+                    await _answer_callback(callback_id, token)
+                    await _edit_message(chat_id, message_id,
+                        f"✅ Registrado: -${monto:,.0f} · {cat_emoji} {cat_name}", token)
+                    await _check_presupuesto_alert(
+                        usuario_id=user_id, categoria_id=cat_id, chat_id=chat_id, token=token
+                    )
         else:
+            # Tarjeta: guardar tarjeta + mes_resumen, preguntar cuotas
             tarjeta_id = int(tarjeta_key)
             tar_r = supabase.table("tarjetas").select("dia_cierre").eq("id", tarjeta_id).single().execute()
             if tar_r.data:
                 dia_cierre = tar_r.data["dia_cierre"]
                 updates["tarjeta_id"] = tarjeta_id
                 updates["mes_resumen"] = calcular_mes_resumen(hoy, dia_cierre)
+            supabase.table("movimientos").update(updates).eq("id", mov_id).execute()
+            monto = mov["monto"]
+            if token:
+                await _answer_callback(callback_id, token)
+                await _edit_message(chat_id, message_id,
+                    f"💳 *${monto:,.0f}* — ¿pagás en cuotas?",
+                    token, reply_markup=_cuotas_pago_keyboard(mov_id, tarjeta_id))
+        return True
 
+    # ── Cuotas post-selección de tarjeta (tar_cuotas:{mov_id}:{tarjeta_id}:{n}) ──
+    if parts[0] == "tar_cuotas" and len(parts) == 4:
+        mov_id = int(parts[1])
+        tarjeta_id = int(parts[2])
+        n_cuotas = int(parts[3])
+
+        mov_r = supabase.table("movimientos").select("*").eq("id", mov_id).eq("usuario_id", user_id).single().execute()
+        if not mov_r.data:
+            if token:
+                await _answer_callback(callback_id, token)
+            return True
+        mov = mov_r.data
         monto = mov["monto"]
-        monto_bajo = monto < 1000
         cat_id = mov.get("categoria_id", 7)
+        mes_resumen = mov.get("mes_resumen", date.today().strftime("%Y-%m"))
 
-        if monto_bajo:
-            updates["estado"] = "pendiente_confirmacion"
-            supabase.table("movimientos").update(updates).eq("id", mov_id).execute()
-            if token:
-                await _answer_callback(callback_id, token)
-                await _edit_message(chat_id, message_id,
-                    f"🤔 Registré *${monto:,.0f}* — ¿está bien o querías decir *${monto * 1000:,.0f}*?",
-                    token, reply_markup=_monto_keyboard(mov_id, monto))
-        elif cat_id == 7:
-            updates["estado"] = "pendiente_categoria"
-            supabase.table("movimientos").update(updates).eq("id", mov_id).execute()
-            if token:
-                await _answer_callback(callback_id, token)
-                await _edit_message(chat_id, message_id,
-                    f"📌 Guardé *${monto:,.0f}* — ¿en qué categoría va *{mov['descripcion']}*?",
-                    token)
-                await _send(chat_id, "Elegí categoría:", token, parse_mode="",
-                            reply_markup=_category_keyboard(mov_id))
-        else:
-            updates["estado"] = "confirmado"
-            supabase.table("movimientos").update(updates).eq("id", mov_id).execute()
-            cat_row = supabase.table("categorias").select("nombre, emoji").eq("id", cat_id).single().execute()
-            cat_name = cat_row.data.get("nombre", "Otros") if cat_row.data else "Otros"
-            cat_emoji = cat_row.data.get("emoji", "📌") if cat_row.data else "📌"
-            if token:
-                await _answer_callback(callback_id, token)
-                await _edit_message(chat_id, message_id,
-                    f"✅ Registrado: -${monto:,.0f} · {cat_emoji} {cat_name}", token)
-                await _check_presupuesto_alert(
-                    usuario_id=user_id, categoria_id=cat_id, chat_id=chat_id, token=token
-                )
-                # Alerta de exceso en colchón si aplica
-                if tarjeta_key != "0" and updates.get("mes_resumen"):
-                    await _check_colchon_exceso(
-                        user_id=user_id, chat_id=chat_id, token=token,
-                        monto=monto, descripcion=mov["descripcion"],
-                        mes_resumen=updates["mes_resumen"],
+        if n_cuotas == 1:
+            # Pago único con tarjeta: finalizar
+            monto_bajo = monto < 1000
+            if monto_bajo:
+                supabase.table("movimientos").update({"estado": "pendiente_confirmacion"}).eq("id", mov_id).execute()
+                if token:
+                    await _answer_callback(callback_id, token)
+                    await _edit_message(chat_id, message_id,
+                        f"🤔 Registré *${monto:,.0f}* — ¿está bien o querías decir *${monto * 1000:,.0f}*?",
+                        token, reply_markup=_monto_keyboard(mov_id, monto))
+            elif cat_id == 7:
+                supabase.table("movimientos").update({"estado": "pendiente_categoria"}).eq("id", mov_id).execute()
+                if token:
+                    await _answer_callback(callback_id, token)
+                    await _edit_message(chat_id, message_id,
+                        f"📌 Guardé *${monto:,.0f}* — ¿en qué categoría va *{mov['descripcion']}*?",
+                        token)
+                    await _send(chat_id, "Elegí categoría:", token, parse_mode="",
+                                reply_markup=_category_keyboard(mov_id))
+            else:
+                supabase.table("movimientos").update({"estado": "confirmado"}).eq("id", mov_id).execute()
+                cat_row = supabase.table("categorias").select("nombre, emoji").eq("id", cat_id).single().execute()
+                cat_name = cat_row.data.get("nombre", "Otros") if cat_row.data else "Otros"
+                cat_emoji = cat_row.data.get("emoji", "📌") if cat_row.data else "📌"
+                if token:
+                    await _answer_callback(callback_id, token)
+                    await _edit_message(chat_id, message_id,
+                        f"✅ Registrado: -${monto:,.0f} · {cat_emoji} {cat_name}", token)
+                    await _check_presupuesto_alert(
+                        usuario_id=user_id, categoria_id=cat_id, chat_id=chat_id, token=token
                     )
+                    if mes_resumen:
+                        await _check_colchon_exceso(
+                            user_id=user_id, chat_id=chat_id, token=token,
+                            monto=monto, descripcion=mov["descripcion"],
+                            mes_resumen=mes_resumen,
+                        )
+        else:
+            # Cuotas: anular movimiento original y crear plan
+            supabase.table("movimientos").update({"estado": "anulado"}).eq("id", mov_id).execute()
+            monto_cuota = round(monto / n_cuotas, 2)
+            result = supabase.table("cuotas_plan").insert({
+                "usuario_id": user_id,
+                "descripcion": mov["descripcion"],
+                "monto_total": monto,
+                "monto_cuota": monto_cuota,
+                "num_cuotas": n_cuotas,
+                "cuota_inicio": 1,
+                "categoria_id": cat_id,
+                "tarjeta_id": tarjeta_id,
+            }).execute()
+            plan_id = result.data[0]["id"] if result.data else None
+            if not plan_id:
+                if token:
+                    await _answer_callback(callback_id, token)
+                    await _edit_message(chat_id, message_id, "Error guardando el plan 😕", token)
+                return True
+            tar_r = supabase.table("tarjetas").select("nombre").eq("id", tarjeta_id).single().execute()
+            nombre_tar = tar_r.data["nombre"] if tar_r.data else "tarjeta"
+            if token:
+                await _answer_callback(callback_id, token)
+                await _edit_message(chat_id, message_id,
+                    f"💳 *{mov['descripcion']}* en {n_cuotas} cuotas de *${monto_cuota:,.0f}* ({nombre_tar})\n¿Primera cuota?",
+                    token, reply_markup=_cuota_fecha_keyboard(plan_id))
         return True
 
     # ── Tarjeta para cuota (cuota_tar:{plan_id}:{tarjeta_id}) ──
