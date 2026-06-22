@@ -49,7 +49,16 @@ const fmt = (n: number) =>
 
 function parseNum(v: unknown): number | null {
   if (v === null || v === undefined || v === '') return null
-  const n = parseFloat(String(v).replace(/[$\s.]/g, '').replace(',', '.'))
+  // XLSX returns numeric cells as JS numbers — use directly to avoid mangling the decimal point
+  if (typeof v === 'number') return isNaN(v) ? null : v
+  const s = String(v).replace(/[$\s]/g, '')
+  // Argentine format "1.234.567,89" — has comma → strip dots then swap comma
+  if (s.includes(',')) {
+    const n = parseFloat(s.replace(/\./g, '').replace(',', '.'))
+    return isNaN(n) ? null : n
+  }
+  // US / plain format "1234567.89" or "1234567"
+  const n = parseFloat(s.replace(/,/g, ''))
   return isNaN(n) ? null : n
 }
 
