@@ -20,6 +20,8 @@ DELETE FROM presupuestos;
 DELETE FROM objetivos_ahorro;
 DELETE FROM keywords_aprendidas;
 DELETE FROM precios_historicos;
+DELETE FROM prestamo_cuotas;
+DELETE FROM prestamos;
 
 -- Resetear secuencias
 ALTER SEQUENCE decisiones_inversion_id_seq  RESTART WITH 1;
@@ -37,5 +39,7 @@ ALTER SEQUENCE presupuestos_id_seq          RESTART WITH 1;
 ALTER SEQUENCE objetivos_ahorro_id_seq      RESTART WITH 1;
 ALTER SEQUENCE keywords_aprendidas_id_seq   RESTART WITH 1;
 ALTER SEQUENCE precios_historicos_id_seq    RESTART WITH 1;
+ALTER SEQUENCE prestamo_cuotas_id_seq       RESTART WITH 1;
+ALTER SEQUENCE prestamos_id_seq             RESTART WITH 1;
 
 -- Se preservan: categorias, activos, instrumentos_rf, perfiles

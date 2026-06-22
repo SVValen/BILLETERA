@@ -208,8 +208,67 @@ async def inversiones_get(request: Request):
         r = supabase.table("instrumentos_rf").select("*").eq("activo", True).order("tipo").execute()
         return JSONResponse(r.data or [])
 
+    # ── prestamos ─────────────────────────────────────────────────────────────
+    if resource == "prestamos":
+        prest_r = (
+            supabase.table("prestamos")
+            .select("*")
+            .eq("usuario_id", telegram_id)
+            .eq("activo", True)
+            .order("id")
+            .execute()
+        )
+        prestamos = prest_r.data or []
+        result = []
+        for p in prestamos:
+            cuotas_r = supabase.table("prestamo_cuotas").select("id, pagado").eq("prestamo_id", p["id"]).execute()
+            cuotas = cuotas_r.data or []
+            total = len(cuotas)
+            pagadas = sum(1 for c in cuotas if c["pagado"])
+            prox_r = (
+                supabase.table("prestamo_cuotas")
+                .select("numero_cuota, mes_previsto, monto_ordinario, capital")
+                .eq("prestamo_id", p["id"])
+                .eq("pagado", False)
+                .order("numero_cuota")
+                .limit(1)
+                .execute()
+            )
+            result.append({
+                **p,
+                "total_cuotas_real": total,
+                "cuotas_pagadas": pagadas,
+                "cuotas_pendientes": total - pagadas,
+                "proxima": prox_r.data[0] if prox_r.data else None,
+            })
+        return JSONResponse(result)
+
+    # ── prestamo_cuotas ───────────────────────────────────────────────────────
+    if resource == "prestamo_cuotas":
+        prestamo_id = request.query_params.get("prestamo_id")
+        if not prestamo_id:
+            return JSONResponse({"error": "prestamo_id requerido"}, status_code=400)
+        prest_r = (
+            supabase.table("prestamos")
+            .select("id")
+            .eq("id", prestamo_id)
+            .eq("usuario_id", telegram_id)
+            .limit(1)
+            .execute()
+        )
+        if not prest_r.data:
+            return JSONResponse({"error": "Préstamo no encontrado"}, status_code=404)
+        cuotas_r = (
+            supabase.table("prestamo_cuotas")
+            .select("*")
+            .eq("prestamo_id", prestamo_id)
+            .order("numero_cuota")
+            .execute()
+        )
+        return JSONResponse(cuotas_r.data or [])
+
     return JSONResponse(
-        {"error": "resource requerido: portafolios|perfil|activos|recomendaciones|decisiones|liquidez|allocation|instrumentos_rf|ping"},
+        {"error": "resource requerido: portafolios|perfil|activos|recomendaciones|decisiones|liquidez|allocation|instrumentos_rf|prestamos|prestamo_cuotas|ping"},
         status_code=400,
     )
 
