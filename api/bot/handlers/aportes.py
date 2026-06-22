@@ -157,16 +157,37 @@ async def handle_aporte_callback(
         dolar_data = await fetch_dolar_precio("bolsa")
         dolar_mep = dolar_data["precio"] if dolar_data else None
 
-        # Actualizar capital en portafolio
+        # Actualizar capital con concurrencia optimista: la condición eq(campo, old)
+        # garantiza que solo un request simultáneo gana; el segundo no modifica filas.
         if moneda == "USD":
-            nuevo_capital = (portafolio.get("capital_usd") or 0) + monto
-            supabase.table("portafolios").update({"capital_usd": nuevo_capital}).eq("id", portafolio_id).execute()
+            old_capital = portafolio.get("capital_usd") or 0
+            nuevo_capital = old_capital + monto
+            upd = (
+                supabase.table("portafolios")
+                .update({"capital_usd": nuevo_capital})
+                .eq("id", portafolio_id)
+                .eq("capital_usd", old_capital)
+                .execute()
+            )
             aporte_row = {"monto_usd": monto, "tipo_cambio_mep": dolar_mep}
         else:
-            nuevo_capital = (portafolio.get("capital_ars") or 0) + monto
-            supabase.table("portafolios").update({"capital_ars": nuevo_capital}).eq("id", portafolio_id).execute()
+            old_capital = portafolio.get("capital_ars") or 0
+            nuevo_capital = old_capital + monto
+            upd = (
+                supabase.table("portafolios")
+                .update({"capital_ars": nuevo_capital})
+                .eq("id", portafolio_id)
+                .eq("capital_ars", old_capital)
+                .execute()
+            )
             monto_usd_equiv = round(monto / dolar_mep, 2) if dolar_mep else None
             aporte_row = {"monto_ars": monto, "monto_usd": monto_usd_equiv, "tipo_cambio_mep": dolar_mep}
+
+        if not upd.data:
+            # Otro request ya registró este aporte (double-tap o retry de Telegram)
+            await _answer_callback(callback_id, token)
+            await _edit_message(chat_id, message_id, "✓ Aporte ya registrado.", token)
+            return True
 
         # Guardar historial de aporte
         supabase.table("aportes_portafolio").insert({

@@ -6,6 +6,12 @@ import re
 from lib.supabase_client import get_supabase
 from ..tg import _send
 
+# Estados propios del flujo /plan_renta (distinto de los estados del wizard portafolio_nuevo)
+_PLAN_RENTA_ESTADOS = (
+    "pidiendo_capital", "pidiendo_objetivo", "pidiendo_broker",
+    "eligiendo_plan", "instrucciones_enviadas",
+)
+
 
 async def _ask_capital_plan(chat_id: int, token: str) -> None:
     """Pregunta capital inicial en USD."""
@@ -127,7 +133,6 @@ async def handle_plan_renta_text(text: str, user_id: str, chat_id: int, token: s
     supabase = get_supabase()
 
     # Buscar si hay un plan_renta en progreso (identificado por estado_wizard)
-    _PLAN_RENTA_ESTADOS = ("pidiendo_capital", "pidiendo_objetivo", "pidiendo_broker", "eligiendo_plan", "instrucciones_enviadas")
     result = (
         supabase.table("portafolios")
         .select("*")
@@ -247,7 +252,6 @@ async def handle_plan_renta_callback(parts: list[str], callback_id: str, chat_id
     broker = parts[1] if len(parts) > 1 else "otro"
 
     # Obtener plan en progreso
-    _PLAN_RENTA_ESTADOS = ("pidiendo_capital", "pidiendo_objetivo", "pidiendo_broker", "eligiendo_plan", "instrucciones_enviadas")
     result = (
         supabase.table("portafolios")
         .select("*")

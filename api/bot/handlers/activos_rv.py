@@ -35,16 +35,23 @@ async def sugerir_activos_rv(chat_id: int, token: str, portafolio: dict) -> None
     Pre-inserta sugeridos en portafolio_activos y muestra el selector.
     """
     from lib.claude_invest import sugerir_activos_para_perfil
+    from lib.market_data import fetch_dolar_precio
 
     rf_pct = portafolio.get("asignacion_rf_pct") or 0
     if rf_pct >= 100:
         return
 
     rv_pct = 100 - rf_pct
-    capital_usd = portafolio.get("capital_usd") or 0
-    capital_rv_usd = capital_usd * rv_pct / 100
     portafolio_id = portafolio["id"]
     tipo = portafolio.get("tipo", "crecimiento")
+
+    # Capital total en USD: considera ambas monedas (dual-currency)
+    dolar_data = await fetch_dolar_precio("bolsa")
+    dolar_mep = (dolar_data.get("precio") if dolar_data else None) or 1200
+    capital_usd = portafolio.get("capital_usd") or 0
+    capital_ars_raw = portafolio.get("capital_ars") or 0
+    capital_total_usd = capital_usd + capital_ars_raw / dolar_mep
+    capital_rv_usd = capital_total_usd * rv_pct / 100
 
     supabase = get_supabase()
     activos_r = (
@@ -67,7 +74,7 @@ async def sugerir_activos_rv(chat_id: int, token: str, portafolio: dict) -> None
     sugerencia = sugerir_activos_para_perfil(
         objetivos=objetivos,
         plazo=plazo,
-        capital=capital_rv_usd * 1200,  # ARS aproximado para el prompt
+        capital=capital_rv_usd * dolar_mep,  # ARS al MEP real
         descripcion=objetivo,
         activos_disponibles=activos_disponibles,
         moneda_preferida=moneda,

@@ -2,9 +2,11 @@ import re
 from datetime import date
 from lib.supabase_client import get_supabase
 from lib.date_utils import add_months
+from lib.tarjetas import calcular_mes_resumen
 from ..tg import _send, _get_dolar_oficial
 from ..keyboards import _cuota_fecha_keyboard
 from ..helpers import _detect_currency, _categorize
+from .tarjetas import get_tarjetas_activas, cuota_tarjeta_keyboard
 
 
 def _first_of_month(d: date) -> date:
@@ -19,11 +21,23 @@ async def _create_cuota_movimientos(plan_id: int, primer_fecha: date, token: str
     p = plan.data
     cuota_inicio = p.get("cuota_inicio", 1)
     remaining = p["num_cuotas"] - cuota_inicio + 1
+    tarjeta_id = p.get("tarjeta_id")
 
-    movimientos = [
-        {
+    # Resolver dia_cierre si tiene tarjeta asociada
+    dia_cierre = None
+    if tarjeta_id:
+        tar_r = supabase.table("tarjetas").select("dia_cierre").eq("id", tarjeta_id).single().execute()
+        dia_cierre = tar_r.data.get("dia_cierre") if tar_r.data else None
+
+    movimientos = []
+    for i in range(remaining):
+        fecha_cuota = add_months(primer_fecha, i)
+        # mes_resumen: como la cuota cae el 1° del mes, siempre es <= dia_cierre → mismo mes
+        mes_res = calcular_mes_resumen(fecha_cuota, dia_cierre) if dia_cierre else None
+        row: dict = {
             "usuario_id": p["usuario_id"],
-            "fecha": add_months(primer_fecha, i).isoformat(),
+            "fecha": fecha_cuota.isoformat(),
+            "fecha_compra": fecha_cuota.isoformat(),
             "descripcion": f"{p['descripcion']} (cuota {cuota_inicio + i}/{p['num_cuotas']})",
             "monto": p["monto_cuota"],
             "categoria_id": p["categoria_id"],
@@ -31,8 +45,12 @@ async def _create_cuota_movimientos(plan_id: int, primer_fecha: date, token: str
             "origen": "telegram",
             "estado": "confirmado",
         }
-        for i in range(remaining)
-    ]
+        if tarjeta_id:
+            row["tarjeta_id"] = tarjeta_id
+        if mes_res:
+            row["mes_resumen"] = mes_res
+        movimientos.append(row)
+
     supabase.table("movimientos").insert(movimientos).execute()
     supabase.table("cuotas_plan").update(
         {"fecha_primera_cuota": primer_fecha.isoformat()}
@@ -87,12 +105,26 @@ async def _registrar_cuota_plan(
         await _send(chat_id, "Error guardando el plan 😕", token, parse_mode="")
         return
 
-    if cuota_actual > 1:
-        prompt = (
-            f"💳 *{descripcion}* — {num_cuotas} cuotas de *${monto_cuota:,.0f}*\n"
-            f"¿Cuándo cae la cuota {cuota_actual}/{num_cuotas}?"
-        )
+    # Preguntar tarjeta antes de la fecha (toda compra en cuotas va con tarjeta)
+    tarjetas = get_tarjetas_activas(user_id)
+    if tarjetas:
+        if cuota_actual > 1:
+            prompt = (
+                f"💳 *{descripcion}* — {num_cuotas} cuotas de *${monto_cuota:,.0f}*\n"
+                f"¿Con qué tarjeta? _(cuota {cuota_actual}/{num_cuotas})_"
+            )
+        else:
+            prompt = (
+                f"💳 *{descripcion}* en {num_cuotas} cuotas de *${monto_cuota:,.0f}*\n"
+                f"¿Con qué tarjeta?"
+            )
+        await _send(chat_id, prompt, token, reply_markup=cuota_tarjeta_keyboard(tarjetas, plan_id))
     else:
-        prompt = f"💳 *{descripcion}* en {num_cuotas} cuotas de *${monto_cuota:,.0f}*\n¿Primera cuota?"
-
-    await _send(chat_id, prompt, token, reply_markup=_cuota_fecha_keyboard(plan_id))
+        if cuota_actual > 1:
+            prompt = (
+                f"💳 *{descripcion}* — {num_cuotas} cuotas de *${monto_cuota:,.0f}*\n"
+                f"¿Cuándo cae la cuota {cuota_actual}/{num_cuotas}?"
+            )
+        else:
+            prompt = f"💳 *{descripcion}* en {num_cuotas} cuotas de *${monto_cuota:,.0f}*\n¿Primera cuota?"
+        await _send(chat_id, prompt, token, reply_markup=_cuota_fecha_keyboard(plan_id))

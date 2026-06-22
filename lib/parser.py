@@ -36,15 +36,18 @@ def parse_aporte(text: str) -> dict | None:
         return None
 
     moneda_str = m.group(2) or ""
+    hint = (m.group(3) or "").strip().lower() or None
+
     if _MONEDA_ARS_RE.match(moneda_str):
         moneda = "ARS"
     elif _MONEDA_USD_RE.match(moneda_str):
         moneda = "USD"
-    else:
-        # Sin moneda explícita: heurística por magnitud
+    elif hint:
+        # Sin moneda explícita pero con destino: heurística por magnitud
         moneda = "ARS" if monto >= 50_000 else "USD"
-
-    hint = (m.group(3) or "").strip().lower() or None
+    else:
+        # Sin moneda ni destino: no es un aporte ("agregué 3000 nafta")
+        return None
 
     return {"monto": monto, "moneda": moneda, "hint": hint}
 

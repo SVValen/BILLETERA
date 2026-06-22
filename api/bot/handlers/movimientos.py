@@ -9,6 +9,46 @@ from ..constants import AYUDA
 from .presupuestos import _check_presupuesto_alert
 from .recurrentes import _registrar_recurrente
 from .cuotas import _registrar_cuota_plan
+from .tarjetas import get_tarjetas_activas, pago_keyboard
+
+
+async def _save_pending_tarjeta(
+    *,
+    chat_id: int,
+    token: str,
+    user_id: str,
+    descripcion: str,
+    monto: float,
+    tipo: str,
+    tarjetas: list[dict],
+    fecha: str | None = None,
+) -> None:
+    """Guarda un gasto en estado pendiente_tarjeta y muestra botones de medio de pago."""
+    categoria_id = await _categorize(descripcion, user_id)
+    supabase = get_supabase()
+    result = supabase.table("movimientos").insert({
+        "usuario_id": user_id,
+        "fecha": fecha or date.today().isoformat(),
+        "fecha_compra": fecha or date.today().isoformat(),
+        "descripcion": descripcion,
+        "monto": monto,
+        "categoria_id": categoria_id,
+        "tipo": tipo,
+        "origen": "telegram",
+        "estado": "pendiente_tarjeta",
+    }).execute()
+
+    mov_id = result.data[0]["id"] if result.data else None
+    if not mov_id:
+        await _send(chat_id, "Error guardando el movimiento 😕", token, parse_mode="")
+        return
+
+    await _send(
+        chat_id,
+        f"💳 *${monto:,.0f} {descripcion}* — ¿cómo lo pagaste?",
+        token,
+        reply_markup=pago_keyboard(tarjetas, mov_id),
+    )
 
 
 async def _save_and_confirm(
@@ -143,9 +183,17 @@ async def _process_text(text: str, user_id: str, chat_id: int, token: str) -> No
             return
         monto_ars = round(monto * tasa)
         descripcion = f"{descripcion} (USD {monto:,.0f} @ ${tasa:,.0f} oficial)"
-        await _save_and_confirm(chat_id=chat_id, token=token, user_id=user_id,
-                                descripcion=descripcion, monto=monto_ars, tipo=tipo)
-        return
+        monto = monto_ars
+
+    # Para gastos: preguntar medio de pago si el usuario tiene tarjetas configuradas
+    if tipo == "gasto":
+        tarjetas = get_tarjetas_activas(user_id)
+        if tarjetas:
+            await _save_pending_tarjeta(
+                chat_id=chat_id, token=token, user_id=user_id,
+                descripcion=descripcion, monto=monto, tipo=tipo,
+            )
+            return
 
     monto_bajo = monto < 1000
     await _save_and_confirm(

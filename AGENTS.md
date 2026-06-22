@@ -47,6 +47,14 @@ El dashboard web muestra reportes, categorías, presupuestos, suscripciones e in
 | `/presupuesto comida 20000` | Fijar presupuesto mensual |
 | `/recurrentes` | Ver gastos recurrentes activos |
 
+### Tarjetas de crédito
+| Comando / Texto | Acción |
+|---|---|
+| `/tarjeta_nueva` | Wizard con botones: nombre → día de cierre |
+| `/tarjetas` | Lista tarjetas activas con día de cierre |
+| `/colchon_nuevo` | Crea portafolio colchón de tarjetas |
+| `/colchon` | Estado del mes: cuotas comprometidas, tope variable, invertido, gastado |
+
 ### Portafolios e inversiones
 | Comando / Texto | Acción |
 |---|---|
@@ -84,11 +92,14 @@ El dashboard web muestra reportes, categorías, presupuestos, suscripciones e in
 3. **Dashboard mensual**: suma ingresos/gastos por categoría con filtro de mes
 4. **Conversión USD**: gastos en USD se convierten a ARS (tipo de cambio oficial); descripción queda con `(USD X @ $Y oficial)`
 5. **Wizard de portafolio**: `/portafolio_nuevo` → tipo → objetivo → plazo/renta → capital → % RF (0-100% libre, ✨ = recomendado) → nombre → activo. Al activar: si RF% > 0 sugiere instrumentos RF; si RV% > 0 sugiere activos RV con toggles (Claude elige 2-4 según perfil, pre-seleccionados en `portafolio_activos`).
-6. **Aporte de capital**: `sumé X USD/ARS` → detecta portafolio destino (por hint o botones si múltiple) → confirma → actualiza `capital_usd` o `capital_ars` → guarda en `aportes_portafolio` → sugiere instrumentos RF para la parte RF del aporte
-9a. **Selección de activos RV** (`/activos`): muestra todos los activos disponibles con toggles; cada tap inserta/elimina directo en `portafolio_activos`; el cron empieza a monitorear inmediatamente.
-7. **Registro RF con botones**: `/opciones_rf` o sugerencia post-wizard/post-aporte → botón instrumento → opciones de monto (25/50/75/100% del capital RF) → confirmar → inserta en `posiciones_rf`
-8. **Cron RV (cada ~30 min)**: actualiza precios + RSI/EMA → genera recomendaciones si hay señal → envía por Telegram con botones [Aceptar][Rechazar]
-9. **Cron RF (L-V 15:00 UTC)**: actualiza TNA/precios RF → evalúa carry trade → alerta vencimientos → sugiere rotación RF↔RV
+6. **Aporte de capital**: `sumé X USD/ARS` → detecta portafolio destino (por hint o botones si múltiple) → confirma → actualiza `capital_usd` o `capital_ars` con concurrencia optimista → guarda en `aportes_portafolio` con tipo de cambio MEP → sugiere instrumentos RF para la parte RF del aporte
+7. **Registro de gasto con tarjeta**: gasto parseado → si usuario tiene tarjetas → guarda `pendiente_tarjeta` → botones [Efectivo][Naranja][Santander]… → callback `pago_tar` → aplica `tarjeta_id`, `fecha_compra`, `mes_resumen=calcular_mes_resumen(hoy, dia_cierre)` → confirma
+8. **Cuotas con tarjeta**: `_registrar_cuota_plan` → si hay tarjetas → botones de tarjeta (sin Efectivo) → `cuota_tar` callback → actualiza `cuotas_plan.tarjeta_id` → pregunta fecha → `_create_cuota_movimientos` propaga `tarjeta_id` + `mes_resumen` a cada cuota
+9. **Colchón de tarjetas** (`/colchon`): muestra comprometido (cuotas fijas) + tope variable + total necesario + invertido (posiciones RF del portafolio colchón) + gastado variable. Si sin tope: llama a Claude con historial (≥2 meses) o pide monto directamente. Alerta de exceso se dispara al registrar un gasto variable que supera el tope.
+10. **Selección de activos RV** (`/activos`): muestra todos los activos disponibles con toggles ✅/⬜; cada tap persiste directo en `portafolio_activos` (insert/delete); el cron empieza a monitorear inmediatamente; también se lanza automáticamente al activar un portafolio con RV% > 0.
+11. **Registro RF con botones**: `/opciones_rf` o sugerencia post-wizard/post-aporte → botón instrumento → calcula capital RF = `(capital_usd * MEP + capital_ars) * rf_pct / 100` → opciones 25/50/75/100% → confirmar → inserta en `posiciones_rf`
+12. **Cron RV (cada ~30 min)**: actualiza precios + RSI/EMA → genera recomendaciones si hay señal → envía por Telegram con botones [Aceptar][Rechazar]
+13. **Cron RF (L-V 15:00 UTC)**: actualiza TNA/precios RF → evalúa carry trade → alerta vencimientos → sugiere rotación RF↔RV
 
 ## Reglas de negocio invariantes
 - Cada movimiento / posición / portafolio pertenece a un único usuario (filtro manual por `usuario_id`)
@@ -96,8 +107,12 @@ El dashboard web muestra reportes, categorías, presupuestos, suscripciones e in
 - Nunca eliminar movimientos: marcar como `estado='anulado'`
 - El balance siempre se calcula con filtro de fecha y usuario
 - Capital en `portafolios`: `capital_usd` (USD) y `capital_ars` (ARS) separados; para allocation se suman convertidos al MEP
-- Posiciones RF: `monto_usd_entrada` es NOT NULL — requiere dólar MEP disponible al registrar
+- `portafolios.proposito`: solo `NULL | 'colchon_tarjetas'` — el colchón es un conservador con propósito específico
+- `tarjetas.dia_cierre`: NULL mientras wizard pendiente; una tarjeta sin dia_cierre no aparece en los botones de pago
+- `movimientos.mes_resumen`: calculado automáticamente según `dia_cierre` de la tarjeta; NULL para gastos en efectivo
 - `posiciones_rf.estado`: solo `abierta | cerrada | vencida` (no `activa` ni `rescatada`)
+- Gastos "variables" con tarjeta: movimientos con `tarjeta_id IS NOT NULL` y descripción sin patrón `(cuota X/N)`; se suman contra `colchon_mensual.tope_variable`
+- Posiciones RF: `monto_usd_entrada` es NOT NULL — requiere dólar MEP disponible al registrar
 - `portafolios.tipo`: solo `conservador | pasivo | crecimiento | oportunista` (CHECK constraint)
 - Aportes registran tipo de cambio MEP del momento para trazabilidad
 - Carry trade: TNA/12 > devaluación MEP mensual → conviene ARS; caso contrario → USD

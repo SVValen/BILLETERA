@@ -1,6 +1,6 @@
 # ARCHITECTURE.md — Billetera
 > Snapshot técnico. Actualizar con /snapshot --update tras cambios significativos.
-> Última actualización: 2026-06-18 (Fase 4 — RV activos selection)
+> Última actualización: 2026-06-22 (Fase 5 — tarjetas, mes de resumen, colchón)
 
 ## Archivos clave
 
@@ -29,6 +29,8 @@
 - `api/bot/handlers/aportes.py` — detección y confirmación de aportes de capital (USD/ARS); sugiere RF post-aporte
 - `api/bot/handlers/posiciones_rf.py` — parser de texto RF + callbacks `rf_elegir` / `rf_monto` / `rf_confirmar` / `rf_rescatar`
 - `api/bot/handlers/activos_rv.py` — `sugerir_activos_rv()`, `handle_activos_cmd()`, `handle_rv_callback()`: selección de activos RV con toggles ✅/⬜; callbacks `rv_toggle`, `rv_confirmar`, `rv_sel_port`
+- `api/bot/handlers/tarjetas.py` — `/tarjeta_nueva` (wizard botones nombre→día_cierre), `/tarjetas`, `pago_keyboard()`, `cuota_tarjeta_keyboard()`, `get_tarjetas_activas()`; callbacks `tnueva_nom`, `tnueva_cie`
+- `api/bot/handlers/colchon.py` — `/colchon_nuevo`, `/colchon` (status + sugerencia Claude), `handle_colchon_text()` (captura monto de tope), `handle_colchon_callback()`; callbacks `colchon_aceptar`, `colchon_set`, `colchon_ajustar`, `colchon_dejar`, `colchon_invest`
 - `api/bot/handlers/comandos_inversion.py` — `/inversiones`, `/portafolio`, `/liquidez`, `/precios`, `/opciones_rf`
 - `api/bot/handlers/plan_renta.py` — wizard legado `/plan_renta` (simplificado; usa `tipo='conservador'` con estados propios)
 - `api/bot/handlers/cuotas.py` — cuotas con progreso (`cuota X/N`), `cuota_inicio`
@@ -58,6 +60,7 @@
 - `lib/indicators.py` — `calcular_rsi()`, `calcular_ema()`, `detectar_tendencia()`, `tiene_senal()`, `interpretar_rsi()`
 - `lib/claude_invest.py` — `generar_recomendacion()`, `sugerir_activos_para_perfil()`, `sugerir_portafolio()`, `responder_pregunta_activos()`, `analizar_oportunidad_rf()`, `formatear_mensaje_telegram()`
 - `lib/rf_analysis.py` — `analizar_carry_trade()`, `evaluar_vencimientos()`, `calcular_rendimiento_usd()`, `calcular_allocation()`
+- `lib/tarjetas.py` — `calcular_mes_resumen(fecha_compra, dia_cierre)`, `mes_siguiente()`, `mes_label()`
 - `lib/auth.py` — `get_telegram_id_from_request()`: extrae telegram_id desde sesión Supabase
 
 ### GitHub Actions
@@ -77,6 +80,7 @@
 9. `schema_migration_portafolios_v2.sql` — ajustes columnas portafolios
 10. `schema_migration_cuota_inicio.sql` — `cuota_inicio` en `cuotas_plan` (DEFAULT 1)
 11. `schema_migration_aportes.sql` — `capital_ars` en `portafolios` + tabla `aportes_portafolio`
+12. `schema_migration_tarjetas.sql` — tabla `tarjetas` + columnas `tarjeta_id/fecha_compra/mes_resumen` en `movimientos` + `tarjeta_id` en `cuotas_plan` + `proposito` en `portafolios` + tabla `colchon_mensual`
 
 ---
 
@@ -97,7 +101,7 @@ Cada archivo `api/foo.py` maneja **solo** `/api/foo`. Sub-paths devuelven 404. P
 ### Dispatcher de texto (orden de prioridad)
 1. Wizard en progreso (`handle_wizard_text`) — pasos de texto del setup de portafolio
 2. Plan renta en progreso (`handle_plan_renta_text`) — wizard legado
-3. Aporte de capital (`parse_aporte`) — "sumé 500 USD", "agregué 200000 pesos"
+3. Aporte de capital (`parse_aporte`) — "sumé 500 USD", "agregué 200000 pesos". Requiere moneda explícita **o** hint de destino; sin ninguno → `None` (evita falso-positivo "agregué 3000 nafta")
 4. Comandos `/...`
 5. Parser RF (`_parse_posicion_rf`) — "puse X en caución", "AL30 X", "lecap X"
 6. Parser de movimiento (`_process_text`) — fallback general
@@ -111,8 +115,10 @@ Conversión al tipo oficial via `dolarapi.com/v1/dolares/oficial`. La descripci�
 ### Capital de portafolio (doble moneda)
 `portafolios.capital_usd` (USD) y `portafolios.capital_ars` (ARS) se almacenan por separado. Para calcular allocation total se convierten al MEP del momento: `total_usd = capital_usd + capital_ars / mep`. Los aportes quedan en `aportes_portafolio` con `tipo_cambio_mep` para trazabilidad.
 
+La actualización de capital usa **concurrencia optimista**: `UPDATE WHERE capital_usd = old_value` (o `capital_ars`). Si no se modifican filas → doble-tap o retry de Telegram detectado → responder silenciosamente sin re-registrar.
+
 ### Registro de posición RF con botones
-Flujo: botón instrumento (`rf_elegir:{id}`) → calcula capital RF disponible al MEP → muestra opciones 25/50/75/100% → `rf_monto:{id}:{ars}` → confirmar (`rf_confirmar:{payload_enc}`) → inserta en `posiciones_rf`. `monto_usd_entrada` se calcula al MEP, es NOT NULL.
+Flujo: botón instrumento (`rf_elegir:{id}`) → calcula capital RF = `(capital_usd * dolar_mep + capital_ars) * rf_pct / 100` (doble moneda) → muestra opciones 25/50/75/100% → `rf_monto:{id}:{ars}` → confirmar (`rf_confirmar:{payload_enc}`) → inserta en `posiciones_rf`. `monto_usd_entrada` se calcula al MEP, es NOT NULL. Ambos callbacks (`rf_elegir` y `rf_monto`) hacen early-exit si no hay portafolio activo.
 
 ### Sugerencia de instrumentos RF
 `_sugerir_instrumentos_rf()` en `wizard_inversion.py` se llama:
@@ -126,6 +132,8 @@ Prioriza instrumentos por tipo según carry trade actual: carry positivo → cau
 
 Flujo: Claude sugiere 2-4 activos basado en perfil (tipo/objetivo/plazo/moneda) → se pre-insertan en `portafolio_activos` → mensaje con toggles ✅/⬜ por activo (3 por fila). Cada tap persiste directo en DB (insert/delete); no hay estado pendiente. Botón "Listo — monitorear N activos" cierra el flujo. Fallback sin Claude: activos hardcodeados por tipo de portafolio.
 
+Capital RV para el prompt de Claude: `capital_total_usd = capital_usd + capital_ars / dolar_mep` (doble moneda); luego `capital_rv_usd * dolar_mep` → ARS para el prompt. No se usa MEP hardcodeado.
+
 `/activos` permite editar la selección de cualquier portafolio activo en cualquier momento.
 
 Una vez que `portafolio_activos` tiene filas, el `cron_inversiones.py` comienza a generar señales RSI/EMA para esos activos.
@@ -136,13 +144,37 @@ RSI (14 períodos) sobre histórico CoinGecko (crypto, hourly) / IOL (acciones, 
 ### Renta Fija — carry trade
 `tna_mensual = tna_caucion / 12`. `devaluacion_mensual = Δ dólar_MEP 30d`. `carry = tna_mensual - devaluacion`. carry > 2% → ENTRAR; 0–2% → Claude evalúa; < 0% → SALIR a USD.
 
+### Tarjetas y mes de resumen (Fase 5)
+`calcular_mes_resumen(fecha_compra, dia_cierre)`: si `dia(fecha_compra) <= dia_cierre` → mismo mes; sino → mes siguiente.
+
+Flujo de registro de gasto con tarjeta: `_process_text` → detecta tarjetas activas → guarda con `estado='pendiente_tarjeta'` → botones [Efectivo][Tarjeta…] → callback `pago_tar:{mov_id}:{tarjeta_id_o_0}` → aplica tarjeta + mes_resumen + finaliza (monto_bajo / categoria / confirmado).
+
+Cuotas: `_registrar_cuota_plan` → si hay tarjetas → pregunta tarjeta → `cuota_tar:{plan_id}:{tarjeta_id}` → pregunta fecha → `_create_cuota_movimientos` propaga `tarjeta_id` y `mes_resumen` a cada movimiento generado.
+
+Wizard tarjeta nueva: botones para nombre (`tnueva_nom:{nombre}`) → inserta `tarjetas` con `dia_cierre=NULL, activa=FALSE` → botones para día (`tnueva_cie:{id}:{dia}`) → activa.
+
+### Colchón de tarjetas (Fase 5)
+Portafolio `tipo='conservador', proposito='colchon_tarjetas'`. Creado con `/colchon_nuevo`.
+
+`/colchon` calcula dinámicamente (sin cachear en BD):
+- `comprometido` = `SUM(monto)` de movimientos con `tarjeta_id IS NOT NULL AND mes_resumen=mes AND descripcion LIKE '(cuota X/N)'`
+- `gastado_variable` = mismo pero sin el patrón cuota
+- `invertido` = `SUM(monto_ars)` de `posiciones_rf` abiertas del portafolio colchón
+- `tope_variable` = guardado en `colchon_mensual` por el usuario (o sugerido por Claude)
+
+Claude sugiere `tope_variable` on-demand solo si hay ≥2 meses de historial de gastos variables con tarjeta. Función `sugerir_tope_tarjetas(historial, presupuesto_total)` en `lib/claude_invest.py`.
+
+Alerta de exceso: `_check_colchon_exceso()` en `movimiento_callbacks.py` se llama desde `pago_tar` (solo gastos variables, no cuotas) cuando `gastado_variable > tope_variable`.
+
 ### Movimientos: estados
-`estado` en `movimientos`: `confirmado` | `pendiente_confirmacion` (monto < $1000) | `pendiente_edicion_monto` | `pendiente_categoria`.
+`estado` en `movimientos`: `confirmado` | `pendiente_confirmacion` (monto < $1000) | `pendiente_edicion_monto` | `pendiente_categoria` | `pendiente_tarjeta` (esperando elección de medio de pago).
 
 ### Wizard de portafolio: estados
 `portafolios.estado_wizard`: `configurando_objetivo` → `configurando_renta` (pasivo) | `configurando_plazo` (cons/crec) | `configurando_capital` (oportunista) → `configurando_rf_pct` → `configurando_nombre` → `activo`.
 RF%: opciones 0/25/50/75/100% para todos los tipos; ✨ marca el recomendado por tipo.
 Estados de solo-botones protegidos por guard en dispatcher.
+
+El cleanup al iniciar `/portafolio_nuevo` borra solo filas en `_WIZARD_ESTADOS` explícito (`configurando_*`), **no** rows de `plan_renta.py` que también usan `tipo='conservador'` — sus estados (`pidiendo_capital`, `eligiendo_plan`, etc.) son disjuntos.
 
 ---
 

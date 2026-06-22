@@ -384,6 +384,54 @@ Respondé SOLO en JSON válido:
         return None
 
 
+def sugerir_tope_tarjetas(historial: dict[str, float], presupuesto_total: float) -> dict | None:
+    """
+    Sugiere un monto de tope_variable para el mes actual basado en el historial
+    de gastos variables con tarjeta de los últimos meses.
+    historial: {mes: monto_gastado}  (solo meses pasados, al menos 2)
+    presupuesto_total: suma de presupuestos del mes actual (contexto de salud financiera)
+    Retorna {monto, razon} o None si Claude falla.
+    """
+    if not historial:
+        return None
+
+    meses_txt = "\n".join(
+        f"  {mes}: ${monto:,.0f}" for mes, monto in sorted(historial.items())
+    )
+    promedio = sum(historial.values()) / len(historial)
+
+    prompt = f"""Sos un asesor financiero personal en Argentina. El usuario quiere fijar un límite
+mensual para gastos variables con tarjeta de crédito (delivery, salidas, compras chicas).
+
+HISTORIAL de gastos variables con tarjeta (últimos meses):
+{meses_txt}
+Promedio mensual: ${promedio:,.0f}
+
+Presupuesto total mensual del usuario: ${presupuesto_total:,.0f}
+
+Sugerí un monto razonable para el tope del mes actual. Considerá:
+- El promedio histórico
+- No comprometer la salud financiera general (no sugerir más del 15% del presupuesto total si el historial lo excede)
+- Ser realista con los patrones del usuario
+
+Respondé SOLO con JSON, sin texto extra:
+{{"monto": <número sin puntos ni comas>, "razon": "<explicación breve en español, máx 100 chars>"}}"""
+
+    try:
+        client = _get_client()
+        response = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=150,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        result = _parse_json(response.content[0].text)
+        if result and "monto" in result:
+            return {"monto": float(result["monto"]), "razon": result.get("razon", "")}
+    except Exception:
+        pass
+    return None
+
+
 def formatear_mensaje_telegram(activo: dict, rec: dict, recomendacion_id: int) -> tuple[str, dict]:
     emoji_accion = {"comprar": "🟢", "vender": "🔴", "mantener": "🟡"}.get(rec["accion"], "⚪")
     emoji_conf = "🔥" if rec["confianza"] >= 8 else "✅" if rec["confianza"] >= 6 else "⚠️"

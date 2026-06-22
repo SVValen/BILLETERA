@@ -111,9 +111,6 @@ async def _ask_rf_pct(chat_id: int, token: str, portafolio_id: int, tipo: str) -
 
     def _label(p: int) -> str:
         base = f"{p}% RF"
-        if p == recomendado or (p == 0 and recomendado < 15):
-            return f"{base} ✨"
-        # Marcar el más cercano al recomendado
         if abs(p - recomendado) == min(abs(x - recomendado) for x in opciones):
             return f"{base} ✨"
         return base
@@ -370,8 +367,13 @@ async def handle_wizard_callback(
             )
             return True
 
-        # Eliminar wizard del mismo tipo que quedó incompleto
-        supabase.table("portafolios").delete().eq("usuario_id", user_id).eq("tipo", tipo).neq("estado_wizard", "activo").execute()
+        # Eliminar wizard del mismo tipo que quedó incompleto (solo estados del wizard real,
+        # nunca los de plan_renta que también usan tipo='conservador')
+        _WIZARD_ESTADOS = (
+            "configurando_objetivo", "configurando_renta", "configurando_plazo",
+            "configurando_capital", "configurando_rf_pct", "configurando_nombre",
+        )
+        supabase.table("portafolios").delete().eq("usuario_id", user_id).eq("tipo", tipo).in_("estado_wizard", list(_WIZARD_ESTADOS)).execute()
 
         result = supabase.table("portafolios").insert({
             "usuario_id": user_id,

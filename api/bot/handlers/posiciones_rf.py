@@ -168,7 +168,7 @@ async def handle_rf_callback(
 
         ports = (
             supabase.table("portafolios")
-            .select("id, capital_usd, asignacion_rf_pct, nombre_personalizado, nombre_sugerido")
+            .select("id, capital_usd, capital_ars, asignacion_rf_pct, nombre_personalizado, nombre_sugerido")
             .eq("usuario_id", user_id)
             .eq("activo", True)
             .eq("estado_wizard", "activo")
@@ -186,8 +186,10 @@ async def handle_rf_callback(
         dolar_mep = dolar_data["precio"] if dolar_data else 1200
 
         capital_usd = portafolio.get("capital_usd") or 0
+        capital_ars_raw = portafolio.get("capital_ars") or 0
         rf_pct = portafolio.get("asignacion_rf_pct") or 30
-        capital_rf_ars = capital_usd * rf_pct / 100 * dolar_mep
+        # Capital total en ARS: USD convertido al MEP + ARS directo
+        capital_rf_ars = (capital_usd * dolar_mep + capital_ars_raw) * rf_pct / 100
 
         nombre_inst = instrumento.get("nombre") or instrumento.get("codigo")
         tna = instrumento.get("tna_actual")
@@ -232,8 +234,12 @@ async def handle_rf_callback(
             .limit(1)
             .execute()
         )
-        portafolio = ports.data[0] if ports.data else {}
-        portafolio_id = portafolio.get("id")
+        if not ports.data:
+            await _answer_callback(callback_id, token)
+            await _send(chat_id, "No tenés portafolios activos. Creá uno con /portafolio_nuevo.", token, parse_mode="")
+            return True
+        portafolio = ports.data[0]
+        portafolio_id = portafolio["id"]
 
         dolar_data = await fetch_dolar_precio("bolsa")
         dolar_mep = dolar_data["precio"] if dolar_data else None

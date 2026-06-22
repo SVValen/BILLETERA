@@ -45,6 +45,15 @@ AYUDA = (
     "  `AL30 200000` — registrar bono\n"
     "  `lecap 300000 S28F6` — registrar letra\n\n"
 
+    "💳 *Tarjetas de crédito:*\n"
+    "  `/tarjeta_nueva` — agregar tarjeta (nombre + día de cierre)\n"
+    "  `/tarjetas` — ver tus tarjetas configuradas\n"
+    "  _Al registrar un gasto te pregunto cómo lo pagaste._\n\n"
+
+    "🪣 *Colchón de tarjetas:*\n"
+    "  `/colchon_nuevo` — crear portafolio para cubrir resúmenes\n"
+    "  `/colchon` — ver estado del mes (cuotas + tope variable + invertido)\n\n"
+
     "📋 *Otros comandos:*\n"
     "  `/presupuesto` — ver estado de tus presupuestos\n"
     "  `/presupuesto comida 20000` — fijar presupuesto mensual\n"
