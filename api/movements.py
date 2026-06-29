@@ -31,6 +31,7 @@ async def get_movements(request: Request):
     todos = request.query_params.get("todos", "")
     tipo = request.query_params.get("tipo", "").strip()
     categoria_id = request.query_params.get("categoria_id", "").strip()
+    tarjeta_id = request.query_params.get("tarjeta_id", "").strip()
 
     supabase = get_supabase()
     query = (
@@ -57,6 +58,12 @@ async def get_movements(request: Request):
     if categoria_id:
         try:
             query = query.eq("categoria_id", int(categoria_id))
+        except ValueError:
+            pass
+
+    if tarjeta_id:
+        try:
+            query = query.eq("tarjeta_id", int(tarjeta_id))
         except ValueError:
             pass
 

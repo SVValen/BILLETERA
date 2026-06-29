@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { fetchWithAuth } from '@/lib/fetch-with-auth'
 import {
   PieChart, Pie, Cell, Tooltip,
@@ -77,6 +77,14 @@ function PieTooltip({ active, payload }: { active?: boolean; payload?: Array<{ n
   )
 }
 
+interface MovDetalle {
+  id: number
+  fecha: string
+  descripcion: string
+  monto: number
+  forma_pago: string
+}
+
 export default function ResumenTab({ mes }: { mes: string }) {
   const [stats, setStats] = useState<Stats | null>(null)
   const [cuotas, setCuotas] = useState<Cuota[]>([])
@@ -84,6 +92,26 @@ export default function ResumenTab({ mes }: { mes: string }) {
   const [tarjetas, setTarjetas] = useState<TarjetaResumen[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [expanded, setExpanded] = useState<number | null>(null)
+  const [detalle, setDetalle] = useState<Record<number, MovDetalle[]>>({})
+  const [loadingDetalle, setLoadingDetalle] = useState<number | null>(null)
+
+  const toggleDetalle = useCallback(async (tarjetaId: number) => {
+    if (expanded === tarjetaId) {
+      setExpanded(null)
+      return
+    }
+    setExpanded(tarjetaId)
+    if (detalle[tarjetaId]) return
+    setLoadingDetalle(tarjetaId)
+    try {
+      const r = await fetchWithAuth(`/api/movements?mes=${mes}&tarjeta_id=${tarjetaId}&todos=1`)
+      const data = await r.json()
+      setDetalle(prev => ({ ...prev, [tarjetaId]: data.data || [] }))
+    } finally {
+      setLoadingDetalle(null)
+    }
+  }, [expanded, detalle, mes])
 
   useEffect(() => {
     let cancelled = false
@@ -212,18 +240,58 @@ export default function ResumenTab({ mes }: { mes: string }) {
           <h3 className="widget-title">🧾 Resumen de tarjetas — {mes}</h3>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {tarjetas.map(t => (
-              <div key={t.tarjeta_id} style={{ border: '1px solid var(--border)', borderRadius: 8, padding: '10px 14px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                  <span style={{ fontWeight: 600 }}>💳 {t.nombre}</span>
-                  {t.pagado ? (
-                    <span style={{ color: '#22c55e', fontSize: 13 }}>✅ Pagado {fmt(t.monto_pagado ?? 0)}{t.fecha_pago ? ` · ${t.fecha_pago}` : ''}</span>
-                  ) : (
-                    <span style={{ fontWeight: 700 }}>{fmt(t.total)}</span>
-                  )}
-                </div>
-                <div className="muted" style={{ fontSize: 12 }}>
-                  Cuotas fijas: {fmt(t.cuotas)} · En 1 pago: {fmt(t.un_pago)}
-                </div>
+              <div key={t.tarjeta_id} style={{ border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
+                {/* Header clickeable */}
+                <button
+                  onClick={() => toggleDetalle(t.tarjeta_id)}
+                  style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', padding: '10px 14px', textAlign: 'left', color: 'inherit' }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                    <span style={{ fontWeight: 600 }}>
+                      {expanded === t.tarjeta_id ? '▾' : '▸'} 💳 {t.nombre}
+                    </span>
+                    {t.pagado ? (
+                      <span style={{ color: '#22c55e', fontSize: 13 }}>✅ Pagado {fmt(t.monto_pagado ?? 0)}{t.fecha_pago ? ` · ${t.fecha_pago}` : ''}</span>
+                    ) : (
+                      <span style={{ fontWeight: 700 }}>{fmt(t.total)}</span>
+                    )}
+                  </div>
+                  <div className="muted" style={{ fontSize: 12, textAlign: 'left' }}>
+                    Cuotas fijas: {fmt(t.cuotas)} · En 1 pago: {fmt(t.un_pago)}
+                  </div>
+                </button>
+
+                {/* Panel de detalle */}
+                {expanded === t.tarjeta_id && (
+                  <div style={{ borderTop: '1px solid var(--border)', padding: '8px 14px 10px' }}>
+                    {loadingDetalle === t.tarjeta_id ? (
+                      <p className="muted" style={{ fontSize: 13, margin: 0 }}>Cargando...</p>
+                    ) : (detalle[t.tarjeta_id] ?? []).length === 0 ? (
+                      <p className="muted" style={{ fontSize: 13, margin: 0 }}>Sin movimientos.</p>
+                    ) : (
+                      <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
+                        <thead>
+                          <tr style={{ color: 'var(--fg3)' }}>
+                            <th style={{ textAlign: 'left', paddingBottom: 4, fontWeight: 500 }}>Fecha</th>
+                            <th style={{ textAlign: 'left', paddingBottom: 4, fontWeight: 500 }}>Descripción</th>
+                            <th style={{ textAlign: 'left', paddingBottom: 4, fontWeight: 500 }}>Forma</th>
+                            <th style={{ textAlign: 'right', paddingBottom: 4, fontWeight: 500 }}>Monto</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(detalle[t.tarjeta_id] ?? []).map(m => (
+                            <tr key={m.id} style={{ borderTop: '1px solid var(--border)' }}>
+                              <td style={{ padding: '4px 0', color: 'var(--fg3)', whiteSpace: 'nowrap', paddingRight: 12 }}>{m.fecha}</td>
+                              <td style={{ padding: '4px 0', paddingRight: 12 }}>{m.descripcion}</td>
+                              <td style={{ padding: '4px 0', color: 'var(--fg3)', paddingRight: 12, whiteSpace: 'nowrap' }}>{m.forma_pago}</td>
+                              <td style={{ padding: '4px 0', textAlign: 'right', fontWeight: 600 }}>{fmt(m.monto)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+                )}
               </div>
             ))}
           </div>
