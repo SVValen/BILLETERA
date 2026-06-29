@@ -30,6 +30,7 @@ El dashboard web muestra reportes, categorías, presupuestos, suscripciones e in
 - Decisiones_inversion: respuestas del usuario (aceptar/rechazar) con seguimiento de resultado
 - Instrumentos RF: cauciones, letras, bonos soberanos, ONs con TNA y precios IOL
 - Posiciones RF: posiciones abiertas con monto ARS, equivalente USD en entrada, TNA contratada
+- Tarjeta_pagos: registro mensual del pago de resumen por tarjeta (monto calculado vs. monto realmente pagado)
 
 ## Comandos del bot (Telegram)
 
@@ -54,6 +55,7 @@ El dashboard web muestra reportes, categorías, presupuestos, suscripciones e in
 | `/tarjetas` | Lista tarjetas activas con día de cierre |
 | `/colchon_nuevo` | Crea portafolio colchón de tarjetas |
 | `/colchon` | Estado del mes: cuotas comprometidas, tope variable, invertido, gastado |
+| `/pagar_tarjeta` | Calcula lo que corresponde pagar este mes por tarjeta (cuotas + compras en 1 pago); permite corregir el monto y registra el pago |
 
 ### Portafolios e inversiones
 | Comando / Texto | Acción |
@@ -96,6 +98,7 @@ El dashboard web muestra reportes, categorías, presupuestos, suscripciones e in
 7. **Registro de gasto con tarjeta**: gasto parseado → si usuario tiene tarjetas → guarda `pendiente_tarjeta` → botones [Efectivo][Naranja][Santander]… → callback `pago_tar` → aplica `tarjeta_id`, `fecha_compra`, `mes_resumen=calcular_mes_resumen(hoy, dia_cierre)` → confirma
 8. **Cuotas con tarjeta**: `_registrar_cuota_plan` → si hay tarjetas → botones de tarjeta (sin Efectivo) → `cuota_tar` callback → actualiza `cuotas_plan.tarjeta_id` → pregunta fecha → `_create_cuota_movimientos` propaga `tarjeta_id` + `mes_resumen` a cada cuota
 9. **Colchón de tarjetas** (`/colchon`): muestra comprometido (cuotas fijas) + tope variable + total necesario + invertido (posiciones RF del portafolio colchón) + gastado variable. Si sin tope: llama a Claude con historial (≥2 meses) o pide monto directamente. Alerta de exceso se dispara al registrar un gasto variable que supera el tope.
+9b. **Pago de resumen de tarjeta** (`/pagar_tarjeta`): para cada tarjeta activa, suma cuotas + compras en 1 pago con `mes_resumen` = mes actual (excluyendo pagos ya registrados) → botones [Confirmar monto calculado][Editar monto] → al confirmar inserta un movimiento gasto `es_pago_tarjeta=TRUE` (categoría "Pago Tarjeta") y un registro en `tarjeta_pagos` (upsert por usuario+tarjeta+mes). El gasto original (categorizado) y el pago del resumen son movimientos independientes — esto es intencional: permite comparar gasto por categoría mes a mes y, por separado, trackear el flujo de caja real de cada pago de tarjeta.
 10. **Selección de activos RV** (`/activos`): muestra todos los activos disponibles con toggles ✅/⬜; cada tap persiste directo en `portafolio_activos` (insert/delete); el cron empieza a monitorear inmediatamente; también se lanza automáticamente al activar un portafolio con RV% > 0.
 11. **Registro RF con botones**: `/opciones_rf` o sugerencia post-wizard/post-aporte → botón instrumento → calcula capital RF = `(capital_usd * MEP + capital_ars) * rf_pct / 100` → opciones 25/50/75/100% → confirmar → inserta en `posiciones_rf`
 12. **Cron RV (cada ~30 min)**: actualiza precios + RSI/EMA → genera recomendaciones si hay señal → envía por Telegram con botones [Aceptar][Rechazar]
@@ -112,6 +115,8 @@ El dashboard web muestra reportes, categorías, presupuestos, suscripciones e in
 - `movimientos.mes_resumen`: calculado automáticamente según `dia_cierre` de la tarjeta; NULL para gastos en efectivo
 - `posiciones_rf.estado`: solo `abierta | cerrada | vencida` (no `activa` ni `rescatada`)
 - Gastos "variables" con tarjeta: movimientos con `tarjeta_id IS NOT NULL` y descripción sin patrón `(cuota X/N)`; se suman contra `colchon_mensual.tope_variable`
+- `movimientos.es_pago_tarjeta`: TRUE solo en el movimiento que representa el pago del resumen (creado por `/pagar_tarjeta`); FALSE en todas las compras. El resumen de gastos por tarjeta (`mes_resumen`) excluye siempre `es_pago_tarjeta=TRUE` para no contarse a sí mismo
+- `tarjeta_pagos`: una fila por usuario+tarjeta+mes_resumen (UNIQUE); `monto_pagado IS NULL` mientras el usuario está respondiendo el monto real por texto (estado transitorio, igual patrón que `colchon_mensual`)
 - Posiciones RF: `monto_usd_entrada` es NOT NULL — requiere dólar MEP disponible al registrar
 - `portafolios.tipo`: solo `conservador | pasivo | crecimiento | oportunista` (CHECK constraint)
 - Aportes registran tipo de cambio MEP del momento para trazabilidad

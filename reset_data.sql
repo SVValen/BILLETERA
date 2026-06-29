@@ -12,6 +12,7 @@ DELETE FROM aportes_portafolio;
 DELETE FROM posiciones_rf;
 DELETE FROM colchon_mensual;
 DELETE FROM portafolios;
+DELETE FROM tarjeta_pagos;
 DELETE FROM movimientos;
 DELETE FROM cuotas_plan;
 DELETE FROM tarjetas;
@@ -41,5 +42,6 @@ ALTER SEQUENCE keywords_aprendidas_id_seq   RESTART WITH 1;
 ALTER SEQUENCE precios_historicos_id_seq    RESTART WITH 1;
 ALTER SEQUENCE prestamo_cuotas_id_seq       RESTART WITH 1;
 ALTER SEQUENCE prestamos_id_seq             RESTART WITH 1;
+ALTER SEQUENCE tarjeta_pagos_id_seq         RESTART WITH 1;
 
 -- Se preservan: categorias, activos, instrumentos_rf, perfiles

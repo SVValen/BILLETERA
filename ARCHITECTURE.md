@@ -1,6 +1,6 @@
 # ARCHITECTURE.md — Billetera
 > Snapshot técnico. Actualizar con /snapshot --update tras cambios significativos.
-> Última actualización: 2026-06-22 (Fase 5 — tarjetas, mes de resumen, colchón)
+> Última actualización: 2026-06-29 (Fase 6b — préstamos, pago de resumen de tarjeta)
 
 ## Archivos clave
 
@@ -29,7 +29,7 @@
 - `api/bot/handlers/aportes.py` — detección y confirmación de aportes de capital (USD/ARS); sugiere RF post-aporte
 - `api/bot/handlers/posiciones_rf.py` — parser de texto RF + callbacks `rf_elegir` / `rf_monto` / `rf_confirmar` / `rf_rescatar`
 - `api/bot/handlers/activos_rv.py` — `sugerir_activos_rv()`, `handle_activos_cmd()`, `handle_rv_callback()`: selección de activos RV con toggles ✅/⬜; callbacks `rv_toggle`, `rv_confirmar`, `rv_sel_port`
-- `api/bot/handlers/tarjetas.py` — `/tarjeta_nueva` (wizard botones nombre→día_cierre), `/tarjetas`, `pago_keyboard()`, `cuota_tarjeta_keyboard()`, `get_tarjetas_activas()`; callbacks `tnueva_nom`, `tnueva_cie`
+- `api/bot/handlers/tarjetas.py` — `/tarjeta_nueva` (wizard botones nombre→día_cierre), `/tarjetas`, `pago_keyboard()`, `cuota_tarjeta_keyboard()`, `get_tarjetas_activas()`; callbacks `tnueva_nom`, `tnueva_cie`. También `/pagar_tarjeta`: `handle_pagar_tarjeta_cmd()`, `handle_pagar_tarjeta_callback()` (`pagtar_confirmar`, `pagtar_editar`), `handle_pagar_tarjeta_text()`, `_calcular_total_tarjeta()`, `_registrar_pago_tarjeta()`
 - `api/bot/handlers/colchon.py` — `/colchon_nuevo`, `/colchon` (status + sugerencia Claude), `handle_colchon_text()` (captura monto de tope), `handle_colchon_callback()`; callbacks `colchon_aceptar`, `colchon_set`, `colchon_ajustar`, `colchon_dejar`, `colchon_invest`
 - `api/bot/handlers/comandos_inversion.py` — `/inversiones`, `/portafolio`, `/liquidez`, `/precios`, `/opciones_rf`
 - `api/bot/handlers/plan_renta.py` — wizard legado `/plan_renta` (simplificado; usa `tipo='conservador'` con estados propios)
@@ -45,12 +45,12 @@
 - `api/cron_rf.py` — L-V 15:00 UTC (GitHub Actions): TNA/precios RF + carry trade + alertas vencimientos
 
 ### Endpoints del dashboard
-- `api/stats.py` — `GET /api/stats?mes=YYYY-MM`: gastos/ingresos por categoría
+- `api/stats.py` — `GET /api/stats?mes=YYYY-MM`: gastos/ingresos por categoría. `GET ?resource=tarjetas`: total a pagar por tarjeta del mes (cuotas + 1 pago) y estado de pago
 - `api/cuotas.py` — `GET /api/cuotas?mes=YYYY-MM`: cuotas activas con progreso (respeta `cuota_inicio`)
 - `api/recurrentes.py` — `GET /api/recurrentes?dias=N`: próximos recurrentes
 - `api/presupuestos.py` — CRUD de presupuestos
 - `api/objetivos.py` — CRUD de objetivos de ahorro
-- `api/movements.py` — lectura/edición de movimientos
+- `api/movements.py` — lectura/edición de movimientos; incluye `tarjeta_id`/`tarjetas(nombre)`/`forma_pago` (derivado: "Pago resumen" / "Cuota X/N" / "1 pago" / "—")
 - `api/inversiones.py` — `GET ?resource=portafolios|perfil|activos|recomendaciones|decisiones|liquidez|allocation|instrumentos_rf`
 
 ### Librerías Python
@@ -81,6 +81,8 @@
 10. `schema_migration_cuota_inicio.sql` — `cuota_inicio` en `cuotas_plan` (DEFAULT 1)
 11. `schema_migration_aportes.sql` — `capital_ars` en `portafolios` + tabla `aportes_portafolio`
 12. `schema_migration_tarjetas.sql` — tabla `tarjetas` + columnas `tarjeta_id/fecha_compra/mes_resumen` en `movimientos` + `tarjeta_id` en `cuotas_plan` + `proposito` en `portafolios` + tabla `colchon_mensual`
+13. `schema_migration_prestamos.sql` — tablas `prestamos` y `prestamo_cuotas` (Fase 6 — préstamos con adelanto de cuotas)
+14. `schema_migration_pagar_tarjeta.sql` — columna `movimientos.es_pago_tarjeta`, categoría "Pago Tarjeta", tabla `tarjeta_pagos`
 
 ---
 
@@ -165,6 +167,15 @@ Portafolio `tipo='conservador', proposito='colchon_tarjetas'`. Creado con `/colc
 Claude sugiere `tope_variable` on-demand solo si hay ≥2 meses de historial de gastos variables con tarjeta. Función `sugerir_tope_tarjetas(historial, presupuesto_total)` en `lib/claude_invest.py`.
 
 Alerta de exceso: `_check_colchon_exceso()` en `movimiento_callbacks.py` se llama desde `pago_tar` (solo gastos variables, no cuotas) cuando `gastado_variable > tope_variable`.
+
+### Pago de resumen de tarjeta (`/pagar_tarjeta`)
+Resuelve un problema distinto al colchón: agrupa, por tarjeta, todo lo que corresponde pagar en el mes actual — cuotas fijas **y** compras en 1 pago — y permite registrar ese pago como un movimiento de caja real, separado de las compras originales.
+
+Modelo de contabilidad (decisión explícita del usuario): una compra con tarjeta queda categorizada en el mes en que se hizo (`mes_resumen`), para poder comparar gasto por categoría mes a mes. El pago del resumen (`/pagar_tarjeta`) es un movimiento **independiente**, registrado en el mes en que efectivamente se paga, con categoría "Pago Tarjeta" y `es_pago_tarjeta=TRUE`. Esto "duplica" el monto en el total de gastos del mes de pago a propósito — es el costo de tener ambas vistas (gasto por categoría + flujo de caja real de tarjetas) sin tener que excluir compras con tarjeta del cálculo de balance existente.
+
+Flujo: `handle_pagar_tarjeta_cmd()` → por cada tarjeta activa, `_calcular_total_tarjeta()` suma cuotas (patrón `(cuota X/N)`) + compras en 1 pago con `mes_resumen` = mes actual, excluyendo movimientos `es_pago_tarjeta=TRUE` y pagos ya registrados en `tarjeta_pagos` para ese mes → botones [Confirmar monto][Editar monto] → `pagtar_confirmar:{tarjeta_id}:{mes}:{monto}` o `pagtar_editar:{tarjeta_id}:{mes}:{monto_calculado}` (inserta fila `tarjeta_pagos` con `monto_pagado=NULL` como marcador y espera el monto por texto, mismo patrón que `colchon_mensual.tope_variable`) → `handle_pagar_tarjeta_text()` detecta la fila pendiente → `_registrar_pago_tarjeta()` inserta el movimiento gasto y hace upsert en `tarjeta_pagos` (`on_conflict` por `usuario_id, tarjeta_id, mes_resumen`).
+
+`api/stats.py?resource=tarjetas` expone el mismo cálculo para el dashboard (widget en `ResumenTab.tsx`), excluyendo siempre `es_pago_tarjeta=TRUE` para no contar el pago contra sí mismo.
 
 ### Movimientos: estados
 `estado` en `movimientos`: `confirmado` | `pendiente_confirmacion` (monto < $1000) | `pendiente_edicion_monto` | `pendiente_categoria` | `pendiente_tarjeta` (esperando elección de medio de pago).

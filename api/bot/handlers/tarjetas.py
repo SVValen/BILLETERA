@@ -2,10 +2,18 @@
 Handler para tarjetas de crédito.
   /tarjeta_nueva  — wizard con botones (nombre → día de cierre)
   /tarjetas       — lista las tarjetas activas del usuario
+  /pagar_tarjeta  — calcula lo que corresponde pagar este mes por tarjeta y registra el pago
   Callbacks: tnueva_nom:{nombre}, tnueva_cie:{tarjeta_id}:{dia}
+             pagtar_confirmar:{tarjeta_id}:{mes}:{monto}, pagtar_editar:{tarjeta_id}:{mes}:{monto}
 """
+import re
+from datetime import date
 from lib.supabase_client import get_supabase
+from lib.tarjetas import mes_label
 from ..tg import _send, _answer_callback, _edit_message
+
+_CUOTA_RE = re.compile(r"\(cuota \d+/\d+\)")
+_MES_ACTUAL = lambda: date.today().strftime("%Y-%m")
 
 # Nombres comunes en Argentina
 _NOMBRES_COMUNES = ["Naranja", "Santander", "BBVA", "Galicia", "Macro", "HSBC", "ICBC", "Visa", "Mastercard"]
@@ -181,3 +189,187 @@ async def handle_tarjeta_callback(
         return True
 
     return False
+
+
+def _calcular_total_tarjeta(supabase, user_id: str, tarjeta_id: int, mes: str) -> float:
+    """Suma cuotas + compras en 1 pago de una tarjeta para un mes_resumen dado."""
+    rows = (
+        supabase.table("movimientos")
+        .select("monto")
+        .eq("usuario_id", user_id)
+        .eq("tarjeta_id", tarjeta_id)
+        .eq("mes_resumen", mes)
+        .eq("tipo", "gasto")
+        .eq("es_pago_tarjeta", False)
+        .neq("estado", "anulado")
+        .execute()
+    )
+    return sum(float(r["monto"]) for r in (rows.data or []))
+
+
+async def handle_pagar_tarjeta_cmd(user_id: str, chat_id: int, token: str) -> None:
+    """Muestra, por cada tarjeta activa, lo que corresponde pagar este mes de resumen."""
+    supabase = get_supabase()
+    mes = _MES_ACTUAL()
+    tarjetas = get_tarjetas_activas(user_id)
+
+    if not tarjetas:
+        await _send(chat_id, "No tenés tarjetas configuradas.\n\nUsá /tarjeta_nueva para agregar una.", token, parse_mode="")
+        return
+
+    pagos_r = (
+        supabase.table("tarjeta_pagos")
+        .select("tarjeta_id, monto_pagado, fecha_pago")
+        .eq("usuario_id", user_id)
+        .eq("mes_resumen", mes)
+        .execute()
+    )
+    pagados = {p["tarjeta_id"]: p for p in (pagos_r.data or []) if p.get("monto_pagado") is not None}
+
+    lines = [f"🧾 *Resumen a pagar — {mes_label(mes).capitalize()}*\n"]
+    buttons: list[list[dict]] = []
+    sin_gastos = True
+
+    for t in tarjetas:
+        total = _calcular_total_tarjeta(supabase, user_id, t["id"], mes)
+        pago = pagados.get(t["id"])
+        if pago:
+            lines.append(f"💳 *{t['nombre']}* — ✅ pagado ${pago['monto_pagado']:,.0f} el {pago.get('fecha_pago', '')}")
+            continue
+        if total <= 0:
+            continue
+        sin_gastos = False
+        lines.append(f"💳 *{t['nombre']}* — ${total:,.0f} a pagar")
+        monto_int = int(round(total))
+        buttons.append([
+            {"text": f"✅ Pagar {t['nombre']} (${total:,.0f})", "callback_data": f"pagtar_confirmar:{t['id']}:{mes}:{monto_int}"},
+        ])
+        buttons.append([
+            {"text": "✏️ Editar monto", "callback_data": f"pagtar_editar:{t['id']}:{mes}:{monto_int}"},
+        ])
+
+    if sin_gastos and len(lines) == 1:
+        lines.append("_No tenés gastos con tarjeta en el resumen de este mes._")
+
+    await _send(chat_id, "\n".join(lines), token, reply_markup={"inline_keyboard": buttons} if buttons else None)
+
+
+async def handle_pagar_tarjeta_callback(
+    parts: list[str],
+    callback_id: str,
+    chat_id: int,
+    message_id: int,
+    user_id: str,
+    supabase,
+    token: str,
+) -> bool:
+    """
+    pagtar_confirmar:{tarjeta_id}:{mes}:{monto} → registra el pago con el monto calculado
+    pagtar_editar:{tarjeta_id}:{mes}:{monto_calculado} → pide el monto real por texto
+    """
+    if parts[0] == "pagtar_confirmar" and len(parts) == 4:
+        tarjeta_id, mes, monto = int(parts[1]), parts[2], float(parts[3])
+        await _registrar_pago_tarjeta(supabase, user_id, tarjeta_id, mes, monto, monto)
+        nombre = await _nombre_tarjeta(supabase, tarjeta_id)
+        await _answer_callback(callback_id, token)
+        await _edit_message(
+            chat_id, message_id,
+            f"✅ Pago registrado: *{nombre}* — ${monto:,.0f} ({mes_label(mes)}).",
+            token,
+        )
+        return True
+
+    if parts[0] == "pagtar_editar" and len(parts) == 4:
+        tarjeta_id, mes, monto_calc = int(parts[1]), parts[2], float(parts[3])
+        supabase.table("tarjeta_pagos").upsert({
+            "usuario_id": user_id,
+            "tarjeta_id": tarjeta_id,
+            "mes_resumen": mes,
+            "monto_calculado": monto_calc,
+            "monto_pagado": None,
+        }, on_conflict="usuario_id,tarjeta_id,mes_resumen").execute()
+        await _answer_callback(callback_id, token)
+        await _edit_message(
+            chat_id, message_id,
+            f"✏️ Calculé ${monto_calc:,.0f}.\n\n_Respondé con el monto que realmente pagaste._",
+            token,
+        )
+        return True
+
+    return False
+
+
+async def handle_pagar_tarjeta_text(text: str, user_id: str, chat_id: int, token: str) -> bool:
+    """Detecta si el usuario está respondiendo con el monto real de un pago de tarjeta pendiente."""
+    num_m = re.search(r"[\d]+(?:[.,]\d+)?", text.replace(".", ""))
+    if not num_m:
+        return False
+
+    supabase = get_supabase()
+    pend_r = (
+        supabase.table("tarjeta_pagos")
+        .select("id, tarjeta_id, mes_resumen, monto_calculado")
+        .eq("usuario_id", user_id)
+        .is_("monto_pagado", "null")
+        .order("creado_at", desc=True)
+        .limit(1)
+        .execute()
+    )
+    if not pend_r.data:
+        return False
+
+    pendiente = pend_r.data[0]
+    monto = float(num_m.group().replace(",", "."))
+    if monto <= 0:
+        return False
+
+    await _registrar_pago_tarjeta(
+        supabase, user_id, pendiente["tarjeta_id"], pendiente["mes_resumen"],
+        float(pendiente["monto_calculado"]), monto,
+    )
+    nombre = await _nombre_tarjeta(supabase, pendiente["tarjeta_id"])
+    await _send(
+        chat_id,
+        f"✅ Pago registrado: *{nombre}* — ${monto:,.0f} ({mes_label(pendiente['mes_resumen'])}).",
+        token,
+    )
+    return True
+
+
+async def _nombre_tarjeta(supabase, tarjeta_id: int) -> str:
+    r = supabase.table("tarjetas").select("nombre").eq("id", tarjeta_id).limit(1).execute()
+    return r.data[0]["nombre"] if r.data else "Tarjeta"
+
+
+async def _registrar_pago_tarjeta(
+    supabase, user_id: str, tarjeta_id: int, mes: str, monto_calculado: float, monto_pagado: float,
+) -> None:
+    """Inserta el movimiento de pago de resumen y actualiza/crea tarjeta_pagos."""
+    nombre = await _nombre_tarjeta(supabase, tarjeta_id)
+
+    cat_r = supabase.table("categorias").select("id").eq("nombre", "Pago Tarjeta").limit(1).execute()
+    cat_id = cat_r.data[0]["id"] if cat_r.data else None
+
+    mov_r = supabase.table("movimientos").insert({
+        "usuario_id": user_id,
+        "fecha": date.today().isoformat(),
+        "descripcion": f"Pago tarjeta {nombre} — resumen {mes_label(mes)}",
+        "monto": monto_pagado,
+        "categoria_id": cat_id,
+        "tipo": "gasto",
+        "origen": "telegram",
+        "estado": "confirmado",
+        "tarjeta_id": tarjeta_id,
+        "es_pago_tarjeta": True,
+    }).execute()
+    movimiento_id = mov_r.data[0]["id"] if mov_r.data else None
+
+    supabase.table("tarjeta_pagos").upsert({
+        "usuario_id": user_id,
+        "tarjeta_id": tarjeta_id,
+        "mes_resumen": mes,
+        "monto_calculado": monto_calculado,
+        "monto_pagado": monto_pagado,
+        "fecha_pago": date.today().isoformat(),
+        "movimiento_id": movimiento_id,
+    }, on_conflict="usuario_id,tarjeta_id,mes_resumen").execute()

@@ -54,6 +54,17 @@ interface Recurrente {
   dias_faltan: number
 }
 
+interface TarjetaResumen {
+  tarjeta_id: number
+  nombre: string
+  cuotas: number
+  un_pago: number
+  total: number
+  pagado: boolean
+  monto_pagado: number | null
+  fecha_pago: string | null
+}
+
 // Tooltip personalizado para el donut
 function PieTooltip({ active, payload }: { active?: boolean; payload?: Array<{ name: string; value: number; payload: { pct: number } }> }) {
   if (!active || !payload?.length) return null
@@ -70,6 +81,7 @@ export default function ResumenTab({ mes }: { mes: string }) {
   const [stats, setStats] = useState<Stats | null>(null)
   const [cuotas, setCuotas] = useState<Cuota[]>([])
   const [recurrentes, setRecurrentes] = useState<Recurrente[]>([])
+  const [tarjetas, setTarjetas] = useState<TarjetaResumen[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -79,18 +91,20 @@ export default function ResumenTab({ mes }: { mes: string }) {
       setLoading(true)
       setError(null)
       try {
-        const [sRes, cRes, rRes] = await Promise.all([
+        const [sRes, cRes, rRes, tRes] = await Promise.all([
           fetchWithAuth(`/api/stats?mes=${mes}`),
           fetchWithAuth(`/api/cuotas?mes=${mes}`),
           fetchWithAuth(`/api/recurrentes?dias=35`),
+          fetchWithAuth(`/api/stats?mes=${mes}&resource=tarjetas`),
         ])
         if (cancelled) return
         if (!sRes.ok) throw new Error('Error al cargar estadísticas')
-        const [sData, cData, rData] = await Promise.all([sRes.json(), cRes.json(), rRes.json()])
+        const [sData, cData, rData, tData] = await Promise.all([sRes.json(), cRes.json(), rRes.json(), tRes.json()])
         if (cancelled) return
         setStats(sData)
         setCuotas(Array.isArray(cData) ? cData : [])
         setRecurrentes(Array.isArray(rData) ? rData : [])
+        setTarjetas(Array.isArray(tData?.tarjetas) ? tData.tarjetas : [])
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : 'Error desconocido')
       } finally {
@@ -191,6 +205,33 @@ export default function ResumenTab({ mes }: { mes: string }) {
           </ResponsiveContainer>
         </div>
       </div>
+
+      {/* Resumen por tarjeta del mes */}
+      {tarjetas.length > 0 && (
+        <div className="widget-box">
+          <h3 className="widget-title">🧾 Resumen de tarjetas — {mes}</h3>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {tarjetas.map(t => (
+              <div key={t.tarjeta_id} style={{ border: '1px solid var(--border)', borderRadius: 8, padding: '10px 14px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                  <span style={{ fontWeight: 600 }}>💳 {t.nombre}</span>
+                  {t.pagado ? (
+                    <span style={{ color: '#22c55e', fontSize: 13 }}>✅ Pagado {fmt(t.monto_pagado ?? 0)}{t.fecha_pago ? ` · ${t.fecha_pago}` : ''}</span>
+                  ) : (
+                    <span style={{ fontWeight: 700 }}>{fmt(t.total)}</span>
+                  )}
+                </div>
+                <div className="muted" style={{ fontSize: 12 }}>
+                  Cuotas fijas: {fmt(t.cuotas)} · En 1 pago: {fmt(t.un_pago)}
+                </div>
+              </div>
+            ))}
+          </div>
+          <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>
+            Usá <code>/pagar_tarjeta</code> en el bot para registrar el pago del resumen.
+          </p>
+        </div>
+      )}
 
       {/* Cuotas en proceso */}
       {cuotas.length > 0 && (

@@ -15,6 +15,9 @@ interface Movement {
   tipo: 'gasto' | 'ingreso'
   origen: string
   categorias: { nombre: string; emoji: string } | null
+  tarjeta_id: number | null
+  tarjetas: { nombre: string } | null
+  forma_pago: string
 }
 
 const CATEGORIAS = [
@@ -141,6 +144,8 @@ export default function MovimientosTab({ mes }: { mes: string }) {
                     <th>Fecha</th>
                     <th>Descripción</th>
                     <th>Categoría</th>
+                    <th>Medio de pago</th>
+                    <th>Forma de pago</th>
                     <th>Origen</th>
                     <th className="right">Monto</th>
                   </tr>
@@ -151,6 +156,8 @@ export default function MovimientosTab({ mes }: { mes: string }) {
                       <td className="date">{m.fecha}</td>
                       <td>{m.descripcion}</td>
                       <td>{m.categorias ? `${m.categorias.emoji} ${m.categorias.nombre}` : '—'}</td>
+                      <td>{m.tarjetas ? `💳 ${m.tarjetas.nombre}` : '💵 Efectivo'}</td>
+                      <td className="muted">{m.forma_pago}</td>
                       <td className="muted">{m.origen}</td>
                       <td className={`right ${m.tipo}`}>
                         {m.tipo === 'gasto' ? '-' : '+'}{fmt(m.monto)}

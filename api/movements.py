@@ -1,5 +1,6 @@
 import sys
 import os
+import re
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -12,6 +13,7 @@ from lib.date_utils import mes_rango, validate_mes
 app = FastAPI()
 
 PAGE_SIZE = 20
+_CUOTA_RE = re.compile(r"\(cuota (\d+)/(\d+)\)")
 
 
 @app.get("/api/movements")
@@ -33,7 +35,7 @@ async def get_movements(request: Request):
     supabase = get_supabase()
     query = (
         supabase.table("movimientos")
-        .select("id, fecha, descripcion, monto, tipo, origen, categorias(nombre, emoji)", count="exact")
+        .select("id, fecha, descripcion, monto, tipo, origen, categorias(nombre, emoji), tarjeta_id, es_pago_tarjeta, tarjetas(nombre)", count="exact")
         .eq("usuario_id", telegram_id)
         .neq("estado", "anulado")
         .order("fecha", desc=True)
@@ -65,8 +67,20 @@ async def get_movements(request: Request):
     response = query.execute()
     total = response.count or 0
 
+    data = response.data or []
+    for r in data:
+        m = _CUOTA_RE.search(r.get("descripcion") or "")
+        if r.get("es_pago_tarjeta"):
+            r["forma_pago"] = "Pago resumen"
+        elif m:
+            r["forma_pago"] = f"Cuota {m.group(1)}/{m.group(2)}"
+        elif r.get("tarjeta_id"):
+            r["forma_pago"] = "1 pago"
+        else:
+            r["forma_pago"] = "—"
+
     return JSONResponse({
-        "data": response.data or [],
+        "data": data,
         "total": total,
         "pagina": pagina,
         "paginas": max(1, -(-total // PAGE_SIZE)),

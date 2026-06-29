@@ -14,7 +14,10 @@ from .handlers.comandos_inversion import _handle_inversiones_cmd, _handle_precio
 from .handlers.plan_renta import handle_plan_renta_text, handle_plan_renta_callback, _ask_capital_plan
 from .handlers.aportes import handle_aporte, handle_aporte_callback
 from .handlers.activos_rv import handle_rv_callback, handle_activos_cmd
-from .handlers.tarjetas import handle_tarjeta_nueva_cmd, handle_tarjetas_cmd, handle_tarjeta_callback
+from .handlers.tarjetas import (
+    handle_tarjeta_nueva_cmd, handle_tarjetas_cmd, handle_tarjeta_callback,
+    handle_pagar_tarjeta_cmd, handle_pagar_tarjeta_callback, handle_pagar_tarjeta_text,
+)
 from .handlers.colchon import handle_colchon_cmd, handle_colchon_nuevo_cmd, handle_colchon_callback, handle_colchon_text
 from .handlers.prestamos import handle_prestamo_callback, handle_prestamos_cmd, detect_prestamo_text
 from .handlers.objetivos import handle_objetivo_nuevo_cmd, handle_objetivos_cmd, handle_objetivo_conectar_cmd, handle_objetivo_callback
@@ -48,6 +51,8 @@ async def dispatch_callback(cq: dict, token: str) -> None:
     if await handle_psel_callback(parts, callback_id, chat_id, message_id, user_id, token):
         return
     if await handle_tarjeta_callback(parts, callback_id, chat_id, message_id, user_id, supabase, token):
+        return
+    if await handle_pagar_tarjeta_callback(parts, callback_id, chat_id, message_id, user_id, supabase, token):
         return
     if await handle_colchon_callback(parts, callback_id, chat_id, message_id, user_id, supabase, token):
         return
@@ -85,6 +90,8 @@ async def dispatch_message(message: dict, token: str) -> None:
             return
         if await handle_colchon_text(transcribed, user_id, chat_id, token):
             return
+        if await handle_pagar_tarjeta_text(transcribed, user_id, chat_id, token):
+            return
         aporte_parsed = parse_aporte(transcribed)
         if aporte_parsed:
             await handle_aporte(aporte_parsed, user_id, chat_id, token)
@@ -104,6 +111,8 @@ async def dispatch_message(message: dict, token: str) -> None:
         if await handle_plan_renta_text(text, user_id, chat_id, token):
             return
         if await handle_colchon_text(text, user_id, chat_id, token):
+            return
+        if await handle_pagar_tarjeta_text(text, user_id, chat_id, token):
             return
         aporte_parsed = parse_aporte(text)
         if aporte_parsed:
@@ -141,6 +150,11 @@ async def dispatch_message(message: dict, token: str) -> None:
     if text.lower().startswith("/tarjetas"):
         if token:
             await handle_tarjetas_cmd(user_id, chat_id, token)
+        return
+
+    if text.lower().startswith("/pagar_tarjeta"):
+        if token:
+            await handle_pagar_tarjeta_cmd(user_id, chat_id, token)
         return
 
     if text.lower().startswith("/colchon_nuevo"):

@@ -48,6 +48,7 @@ AYUDA = (
     "💳 *Tarjetas de crédito:*\n"
     "  `/tarjeta_nueva` — agregar tarjeta (nombre + día de cierre)\n"
     "  `/tarjetas` — ver tus tarjetas configuradas\n"
+    "  `/pagar_tarjeta` — calcula lo que corresponde pagar este mes por tarjeta (cuotas + compras en 1 pago) y registra el pago\n"
     "  _Al registrar un gasto te pregunto cómo lo pagaste._\n\n"
 
     "🪣 *Colchón de tarjetas:*\n"
