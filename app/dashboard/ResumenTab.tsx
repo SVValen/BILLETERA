@@ -105,7 +105,7 @@ export default function ResumenTab({ mes }: { mes: string }) {
     if (detalle[tarjetaId]) return
     setLoadingDetalle(tarjetaId)
     try {
-      const r = await fetchWithAuth(`/api/movements?mes=${mes}&tarjeta_id=${tarjetaId}&todos=1`)
+      const r = await fetchWithAuth(`/api/movements?mes_resumen=${mes}&tarjeta_id=${tarjetaId}&todos=1`)
       const data = await r.json()
       setDetalle(prev => ({ ...prev, [tarjetaId]: data.data || [] }))
     } finally {

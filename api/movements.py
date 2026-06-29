@@ -32,6 +32,7 @@ async def get_movements(request: Request):
     tipo = request.query_params.get("tipo", "").strip()
     categoria_id = request.query_params.get("categoria_id", "").strip()
     tarjeta_id = request.query_params.get("tarjeta_id", "").strip()
+    mes_resumen = request.query_params.get("mes_resumen", "").strip()
 
     supabase = get_supabase()
     query = (
@@ -66,6 +67,10 @@ async def get_movements(request: Request):
             query = query.eq("tarjeta_id", int(tarjeta_id))
         except ValueError:
             pass
+
+    if mes_resumen:
+        if validate_mes(mes_resumen):
+            query = query.eq("mes_resumen", mes_resumen)
 
     if not todos:
         offset = (pagina - 1) * PAGE_SIZE
