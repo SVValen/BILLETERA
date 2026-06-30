@@ -1,6 +1,6 @@
 # ARCHITECTURE.md — Billetera
 > Snapshot técnico. Actualizar con /snapshot --update tras cambios significativos.
-> Última actualización: 2026-06-30 (rediseño dashboard — tabs Inicio / Detalle mensual)
+> Última actualización: 2026-06-30 (auto-registro de gastos vía email Santander — IMAP + confirmación Telegram)
 
 ## Archivos clave
 
@@ -30,7 +30,7 @@
 - `api/bot/handlers/aportes.py` — detección y confirmación de aportes de capital (USD/ARS); sugiere RF post-aporte
 - `api/bot/handlers/posiciones_rf.py` — parser de texto RF + callbacks `rf_elegir` / `rf_monto` / `rf_confirmar` / `rf_rescatar`
 - `api/bot/handlers/activos_rv.py` — `sugerir_activos_rv()`, `handle_activos_cmd()`, `handle_rv_callback()`: selección de activos RV con toggles ✅/⬜; callbacks `rv_toggle`, `rv_confirmar`, `rv_sel_port`
-- `api/bot/handlers/tarjetas.py` — `/tarjeta_nueva` (wizard botones nombre→día_cierre), `/tarjetas`, `pago_keyboard()`, `cuota_tarjeta_keyboard()`, `get_tarjetas_activas()`; callbacks `tnueva_nom`, `tnueva_cie`. También `/pagar_tarjeta`: `handle_pagar_tarjeta_cmd()`, `handle_pagar_tarjeta_callback()` (`pagtar_confirmar`, `pagtar_editar`), `handle_pagar_tarjeta_text()`, `_calcular_total_tarjeta()`, `_registrar_pago_tarjeta()`
+- `api/bot/handlers/tarjetas.py` — `/tarjeta_nueva` (wizard botones nombre→día_cierre), `/tarjetas`, `pago_keyboard()`, `cuota_tarjeta_keyboard()`, `get_tarjetas_activas()`; callbacks `tnueva_nom`, `tnueva_cie`. También `/pagar_tarjeta`: `handle_pagar_tarjeta_cmd()`, `handle_pagar_tarjeta_callback()` (`pagtar_confirmar`, `pagtar_editar`), `handle_pagar_tarjeta_text()`, `_calcular_total_tarjeta()`, `_registrar_pago_tarjeta()`. Callback `last4_tar:{map_id}:{tarjeta_id}` (dentro de `handle_tarjeta_callback()`): resuelve a qué tarjeta corresponde un last4 detectado por el sync de email
 - `api/bot/handlers/colchon.py` — `/colchon_nuevo`, `/colchon` (status + sugerencia Claude), `handle_colchon_text()` (captura monto de tope), `handle_colchon_callback()`; callbacks `colchon_aceptar`, `colchon_set`, `colchon_ajustar`, `colchon_dejar`, `colchon_invest`
 - `api/bot/handlers/comandos_inversion.py` — `/inversiones`, `/portafolio`, `/liquidez`, `/precios`, `/opciones_rf`
 - `api/bot/handlers/plan_renta.py` — wizard legado `/plan_renta` (simplificado; usa `tipo='conservador'` con estados propios)
@@ -63,11 +63,14 @@
 - `lib/rf_analysis.py` — `analizar_carry_trade()`, `evaluar_vencimientos()`, `calcular_rendimiento_usd()`, `calcular_allocation()`
 - `lib/tarjetas.py` — `calcular_mes_resumen(fecha_compra, dia_cierre)`, `mes_siguiente()`, `mes_label()`
 - `lib/auth.py` — `get_telegram_id_from_request()`: extrae telegram_id desde sesión Supabase
+- `lib/email_parser_santander.py` — `identificar_tipo_email(subject, body)` clasifica mails de aviso Santander en 4 tipos; `parse_email(tipo, subject, body)` extrae `{monto, moneda, descripcion, fecha, last4}` (+ `num_cuotas` en tipo cuotas, monto = total de la compra)
+- `lib/gmail_sync.py` — `sync_gmail_all_users()` / `sync_gmail_for_user()`: polling IMAP de mails no leídos de Santander, dedup por `Message-ID`, routea cada tipo al flujo de Telegram correspondiente (efectivo o tarjeta con resolución de last4)
 
 ### GitHub Actions
 - `.github/workflows/cron-inversiones.yml` — cada 30 min: llama `/api/cron_inversiones`
 - `.github/workflows/cron-outcomes.yml` — diario 03:00 UTC: llama `/api/cron_inversiones/outcomes`
 - `.github/workflows/cron-rf.yml` — L-V 15:00 UTC: llama `/api/cron_rf`
+- `.github/workflows/cron-gmail-sync.yml` — cada 20 min: llama `/api/cron_inversiones?job=gmail_sync`
 
 ### Schema SQL (orden de aplicación)
 1. `schema.sql` — base: `movimientos`, `categorias`
@@ -84,6 +87,7 @@
 12. `schema_migration_tarjetas.sql` — tabla `tarjetas` + columnas `tarjeta_id/fecha_compra/mes_resumen` en `movimientos` + `tarjeta_id` en `cuotas_plan` + `proposito` en `portafolios` + tabla `colchon_mensual`
 13. `schema_migration_prestamos.sql` — tablas `prestamos` y `prestamo_cuotas` (Fase 6 — préstamos con adelanto de cuotas)
 14. `schema_migration_pagar_tarjeta.sql` — columna `movimientos.es_pago_tarjeta`, categoría "Pago Tarjeta", tabla `tarjeta_pagos`
+15. `schema_migration_gmail_sync.sql` — tablas `usuario_gmail_config` (credenciales IMAP por usuario), `email_procesados` (dedup por `Message-ID`), `tarjeta_last4_map` (mapeo last4 → tarjeta)
 
 ---
 
@@ -177,6 +181,24 @@ Modelo de contabilidad (decisión explícita del usuario): una compra con tarjet
 Flujo: `handle_pagar_tarjeta_cmd()` → por cada tarjeta activa, `_calcular_total_tarjeta()` suma cuotas (patrón `(cuota X/N)`) + compras en 1 pago con `mes_resumen` = mes actual, excluyendo movimientos `es_pago_tarjeta=TRUE` y pagos ya registrados en `tarjeta_pagos` para ese mes → botones [Confirmar monto][Editar monto] → `pagtar_confirmar:{tarjeta_id}:{mes}:{monto}` o `pagtar_editar:{tarjeta_id}:{mes}:{monto_calculado}` (inserta fila `tarjeta_pagos` con `monto_pagado=NULL` como marcador y espera el monto por texto, mismo patrón que `colchon_mensual.tope_variable`) → `handle_pagar_tarjeta_text()` detecta la fila pendiente → `_registrar_pago_tarjeta()` inserta el movimiento gasto y hace upsert en `tarjeta_pagos` (`on_conflict` por `usuario_id, tarjeta_id, mes_resumen`).
 
 `api/stats.py?resource=tarjetas` expone el mismo cálculo para el dashboard (widget en `DetalleMensualTab.tsx`), excluyendo siempre `es_pago_tarjeta=TRUE` para no contar el pago contra sí mismo. El detalle expandible de cada tarjeta filtra movimientos por `mes_resumen` (no `fecha`) vía `GET /api/movements?mes_resumen=&tarjeta_id=`, para que coincida con el agrupamiento del resumen.
+
+### Auto-registro de gastos vía email Santander
+Lee mails de aviso de Santander por IMAP (Gmail, contraseña de aplicación por usuario en `usuario_gmail_config`) y dispara el mismo flujo de confirmación de Telegram que un gasto tipeado a mano — nunca registra en silencio. Solo Santander, 4 tipos de mail.
+
+`identificar_tipo_email()` clasifica por keywords de subject/body en `lib/email_parser_santander.py`: débito automático en TC (ej. suscripciones USD), pago TC en 1 pago, pago TC en cuotas (monto del mail = total de la compra), pago con tarjeta de débito.
+
+`sync_gmail_for_user()` (`lib/gmail_sync.py`) por cada mail no leído del remitente Santander: dedup por header `Message-ID` contra `email_procesados` → parsea → rutea → recién marca leído. Try/except por mail individual para que un fallo no tumbe el resto del inbox.
+
+Routing por tipo:
+- **Débito automático y débito**: se tratan como efectivo — `_save_and_confirm()` (`movimientos.py`), sin `tarjeta_id` ni `mes_resumen`. Si es USD, conversión via `_get_dolar_oficial()` igual que `_process_text`.
+- **Pago TC 1 pago**: insert directo en `movimientos` con `tarjeta_id`/`mes_resumen` ya resueltos → `finalizar_pago_tarjeta_unico()` (helper extraído en `movimiento_callbacks.py`, compartido con el callback `tar_cuotas` cuando `n_cuotas == 1`) decide el estado final (`pendiente_confirmacion` / `pendiente_categoria` / `confirmado`).
+- **Pago TC en cuotas**: replica `_registrar_cuota_plan` pero con `tarjeta_id` ya seteado en `cuotas_plan`, `monto_cuota = monto_total / num_cuotas`, y pregunta directo la fecha (`_cuota_fecha_keyboard`) — de ahí en más usa el callback `cuota_fecha` existente sin cambios.
+
+Matching de tarjeta por "terminada en NNNN" — preguntar una sola vez: lookup en `tarjeta_last4_map` por `(usuario_id, last4)`. Sin fila → crea fila con `tarjeta_id NULL` (marcador pendiente, mismo patrón que `colchon_mensual.tope_variable`) + botones por tarjeta activa, callback `last4_tar:{map_id}:{tarjeta_id}` en `tarjetas.py`. Fila pendiente sin resolver → el mail no se marca `email_procesados` ni leído, se reintenta en el próximo poll.
+
+Sin función `api/*.py` nueva (límite Vercel Hobby 12/12): toda la lógica vive en `lib/gmail_sync.py` y `lib/email_parser_santander.py`, invocada vía `?job=gmail_sync` en el dispatcher ya existente de `api/cron_inversiones.py`. Logging: solo contadores/usuario_id — nunca monto, descripción ni body del mail.
+
+`movimientos.origen='email'` distingue estos inserts de los manuales (`'manual'`/`'telegram'`) para trazabilidad en el dashboard.
 
 ### Movimientos: estados
 `estado` en `movimientos`: `confirmado` | `pendiente_confirmacion` (monto < $1000) | `pendiente_edicion_monto` | `pendiente_categoria` | `pendiente_tarjeta` (esperando elección de medio de pago).

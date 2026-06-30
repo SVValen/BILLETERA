@@ -62,7 +62,7 @@ async def _save_and_confirm(
     estado: str = "confirmado",
     nota_monto_bajo: bool = False,
     fecha: str | None = None,
-) -> None:
+) -> int | None:
     categoria_id = 17 if tipo == "ingreso" else await _categorize(descripcion, user_id)
 
     supabase = get_supabase()
@@ -86,7 +86,7 @@ async def _save_and_confirm(
             token,
             reply_markup=_monto_keyboard(movement_id, monto),
         )
-        return
+        return movement_id
 
     if categoria_id == 7 and tipo == "gasto" and movement_id:
         await _send(
@@ -95,7 +95,7 @@ async def _save_and_confirm(
             token,
             reply_markup=_category_keyboard(movement_id),
         )
-        return
+        return movement_id
 
     cat_row = supabase.table("categorias").select("nombre, emoji").eq("id", categoria_id).single().execute()
     cat_name = cat_row.data.get("nombre", "Otros") if cat_row.data else "Otros"
@@ -107,6 +107,8 @@ async def _save_and_confirm(
         await _check_presupuesto_alert(
             usuario_id=user_id, categoria_id=categoria_id, chat_id=chat_id, token=token
         )
+
+    return movement_id
 
 
 async def _process_text(text: str, user_id: str, chat_id: int, token: str) -> None:

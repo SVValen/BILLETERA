@@ -131,6 +131,8 @@ async def cron_inversiones(request: Request, job: str = ""):
     # Despachar jobs alternativos via ?job=
     if job == "outcomes":
         return await _job_outcomes(request)
+    if job == "gmail_sync":
+        return await _job_gmail_sync()
 
     supabase = get_supabase()
 
@@ -254,6 +256,13 @@ async def cron_inversiones(request: Request, job: str = ""):
         "activos_actualizados": len(activos_actualizados),
         "recomendaciones_generadas": recomendaciones_generadas,
     })
+
+
+async def _job_gmail_sync() -> JSONResponse:
+    """Job: lee mails de aviso de Santander de todos los usuarios con Gmail configurado."""
+    from lib.gmail_sync import sync_gmail_all_users
+    stats = await sync_gmail_all_users(token=TELEGRAM_TOKEN)
+    return JSONResponse({"ok": True, **stats})
 
 
 async def _job_outcomes(request: Request) -> JSONResponse:

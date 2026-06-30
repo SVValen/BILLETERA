@@ -163,6 +163,30 @@ async def handle_tarjeta_callback(
         )
         return True
 
+    if parts[0] == "last4_tar" and len(parts) == 3:
+        map_id = int(parts[1])
+        tarjeta_id = int(parts[2])
+
+        upd = (
+            supabase.table("tarjeta_last4_map")
+            .update({"tarjeta_id": tarjeta_id})
+            .eq("id", map_id)
+            .eq("usuario_id", user_id)
+            .execute()
+        )
+        if not upd.data:
+            await _answer_callback(callback_id, token)
+            return True
+
+        nombre = await _nombre_tarjeta(supabase, tarjeta_id)
+        await _answer_callback(callback_id, token)
+        await _edit_message(
+            chat_id, message_id,
+            f"✅ Asociada a *{nombre}*. La próxima vez que vea esa tarjeta no voy a volver a preguntar.",
+            token,
+        )
+        return True
+
     if parts[0] == "tnueva_cie" and len(parts) == 3:
         tarjeta_id = int(parts[1])
         dia = int(parts[2])

@@ -104,41 +104,11 @@ async def handle_movimiento_callback(
 
         if n_cuotas == 1:
             # Pago único con tarjeta: finalizar
-            monto_bajo = monto < 1000
-            if monto_bajo:
-                supabase.table("movimientos").update({"estado": "pendiente_confirmacion"}).eq("id", mov_id).execute()
-                if token:
-                    await _answer_callback(callback_id, token)
-                    await _edit_message(chat_id, message_id,
-                        f"🤔 Registré *${monto:,.0f}* — ¿está bien o querías decir *${monto * 1000:,.0f}*?",
-                        token, reply_markup=_monto_keyboard(mov_id, monto))
-            elif cat_id == 7:
-                supabase.table("movimientos").update({"estado": "pendiente_categoria"}).eq("id", mov_id).execute()
-                if token:
-                    await _answer_callback(callback_id, token)
-                    await _edit_message(chat_id, message_id,
-                        f"📌 Guardé *${monto:,.0f}* — ¿en qué categoría va *{mov['descripcion']}*?",
-                        token)
-                    await _send(chat_id, "Elegí categoría:", token, parse_mode="",
-                                reply_markup=_category_keyboard(mov_id))
-            else:
-                supabase.table("movimientos").update({"estado": "confirmado"}).eq("id", mov_id).execute()
-                cat_row = supabase.table("categorias").select("nombre, emoji").eq("id", cat_id).single().execute()
-                cat_name = cat_row.data.get("nombre", "Otros") if cat_row.data else "Otros"
-                cat_emoji = cat_row.data.get("emoji", "📌") if cat_row.data else "📌"
-                if token:
-                    await _answer_callback(callback_id, token)
-                    await _edit_message(chat_id, message_id,
-                        f"✅ Registrado: -${monto:,.0f} · {cat_emoji} {cat_name}", token)
-                    await _check_presupuesto_alert(
-                        usuario_id=user_id, categoria_id=cat_id, chat_id=chat_id, token=token
-                    )
-                    if mes_resumen:
-                        await _check_colchon_exceso(
-                            user_id=user_id, chat_id=chat_id, token=token,
-                            monto=monto, descripcion=mov["descripcion"],
-                            mes_resumen=mes_resumen,
-                        )
+            if token:
+                await _answer_callback(callback_id, token)
+                await finalizar_pago_tarjeta_unico(
+                    supabase, user_id, mov_id, chat_id=chat_id, token=token, message_id=message_id,
+                )
         else:
             # Cuotas: anular movimiento original y crear plan
             supabase.table("movimientos").update({"estado": "anulado"}).eq("id", mov_id).execute()
@@ -474,6 +444,53 @@ async def handle_movimiento_callback(
         return True
 
     return False
+
+
+async def finalizar_pago_tarjeta_unico(
+    supabase, user_id: str, mov_id: int, *, chat_id: int, token: str,
+    message_id: int | None = None,
+) -> None:
+    """
+    Decide el estado final (pendiente_confirmacion / pendiente_categoria / confirmado)
+    de un gasto con tarjeta en 1 pago y notifica. Reusado por el callback tar_cuotas
+    (message_id seteado, edita el mensaje) y por el flujo de email tipo b (sin message_id, manda uno nuevo).
+    """
+    mov_r = supabase.table("movimientos").select("*").eq("id", mov_id).eq("usuario_id", user_id).single().execute()
+    if not mov_r.data:
+        return
+    mov = mov_r.data
+    monto = mov["monto"]
+    cat_id = mov.get("categoria_id", 7)
+    mes_resumen = mov.get("mes_resumen", date.today().strftime("%Y-%m"))
+
+    async def _notify(text: str, reply_markup: dict | None = None) -> None:
+        if message_id is not None:
+            await _edit_message(chat_id, message_id, text, token, reply_markup=reply_markup)
+        else:
+            await _send(chat_id, text, token, reply_markup=reply_markup)
+
+    if monto < 1000:
+        supabase.table("movimientos").update({"estado": "pendiente_confirmacion"}).eq("id", mov_id).execute()
+        await _notify(
+            f"🤔 Registré *${monto:,.0f}* — ¿está bien o querías decir *${monto * 1000:,.0f}*?",
+            _monto_keyboard(mov_id, monto),
+        )
+    elif cat_id == 7:
+        supabase.table("movimientos").update({"estado": "pendiente_categoria"}).eq("id", mov_id).execute()
+        await _notify(f"📌 Guardé *${monto:,.0f}* — ¿en qué categoría va *{mov['descripcion']}*?")
+        await _send(chat_id, "Elegí categoría:", token, parse_mode="", reply_markup=_category_keyboard(mov_id))
+    else:
+        supabase.table("movimientos").update({"estado": "confirmado"}).eq("id", mov_id).execute()
+        cat_row = supabase.table("categorias").select("nombre, emoji").eq("id", cat_id).single().execute()
+        cat_name = cat_row.data.get("nombre", "Otros") if cat_row.data else "Otros"
+        cat_emoji = cat_row.data.get("emoji", "📌") if cat_row.data else "📌"
+        await _notify(f"✅ Registrado: -${monto:,.0f} · {cat_emoji} {cat_name}")
+        await _check_presupuesto_alert(usuario_id=user_id, categoria_id=cat_id, chat_id=chat_id, token=token)
+        if mes_resumen:
+            await _check_colchon_exceso(
+                user_id=user_id, chat_id=chat_id, token=token,
+                monto=monto, descripcion=mov["descripcion"], mes_resumen=mes_resumen,
+            )
 
 
 async def _check_colchon_exceso(

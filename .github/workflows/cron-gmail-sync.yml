@@ -1,0 +1,23 @@
+name: Cron Gmail Sync
+
+on:
+  schedule:
+    - cron: '*/20 * * * *'
+  workflow_dispatch:
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Leer mails de Santander y registrar gastos
+        run: |
+          HTTP_CODE=$(curl -s -o /tmp/response.txt -w "%{http_code}" \
+            -X GET \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            "https://billetera-gamma.vercel.app/api/cron_inversiones?job=gmail_sync")
+          echo "HTTP Status: $HTTP_CODE"
+          cat /tmp/response.txt
+          if [ "$HTTP_CODE" -ge 400 ]; then
+            echo "Error: endpoint returned $HTTP_CODE"
+            exit 1
+          fi
