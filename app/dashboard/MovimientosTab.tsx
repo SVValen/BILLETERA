@@ -14,32 +14,18 @@ interface Movement {
   monto: number
   tipo: 'gasto' | 'ingreso'
   origen: string
+  categoria_id: number | null
   categorias: { nombre: string; emoji: string } | null
   tarjeta_id: number | null
   tarjetas: { nombre: string } | null
   forma_pago: string
 }
 
-const CATEGORIAS = [
-  { id: 1,  emoji: '🛒', nombre: 'Supermercado' },
-  { id: 2,  emoji: '🚗', nombre: 'Transporte' },
-  { id: 3,  emoji: '🍽️', nombre: 'Comida' },
-  { id: 4,  emoji: '💡', nombre: 'Servicios' },
-  { id: 5,  emoji: '🎬', nombre: 'Entretenimiento' },
-  { id: 6,  emoji: '🏥', nombre: 'Salud' },
-  { id: 7,  emoji: '📌', nombre: 'Otros' },
-  { id: 8,  emoji: '👕', nombre: 'Ropa' },
-  { id: 9,  emoji: '📚', nombre: 'Educación' },
-  { id: 10, emoji: '🏠', nombre: 'Vivienda' },
-  { id: 11, emoji: '🐾', nombre: 'Mascotas' },
-  { id: 12, emoji: '✈️', nombre: 'Viajes' },
-  { id: 13, emoji: '🛡️', nombre: 'Seguros' },
-  { id: 14, emoji: '💰', nombre: 'Inversiones' },
-  { id: 15, emoji: '💳', nombre: 'Compras Online' },
-  { id: 16, emoji: '✨', nombre: 'Belleza' },
-  { id: 17, emoji: '💵', nombre: 'Ingresos' },
-  { id: 18, emoji: '📱', nombre: 'Suscripciones' },
-]
+interface Categoria {
+  id: number
+  emoji: string
+  nombre: string
+}
 
 export default function MovimientosTab({ mes }: { mes: string }) {
   const [movements, setMovements] = useState<Movement[]>([])
@@ -54,6 +40,15 @@ export default function MovimientosTab({ mes }: { mes: string }) {
   const [filtroCategoria, setFiltroCategoria] = useState('')
   const [fechaDesde, setFechaDesde] = useState('')
   const [fechaHasta, setFechaHasta] = useState('')
+  const [categorias, setCategorias] = useState<Categoria[]>([])
+  const [recategorizando, setRecategorizando] = useState<number | null>(null)
+
+  useEffect(() => {
+    fetchWithAuth('/api/presupuestos?resource=categorias')
+      .then(r => r.json())
+      .then(data => setCategorias(Array.isArray(data) ? data : []))
+      .catch(() => {})
+  }, [])
 
   const fetch_ = useCallback(async () => {
     setLoading(true)
@@ -87,6 +82,16 @@ export default function MovimientosTab({ mes }: { mes: string }) {
   function buscar() {
     setQ(qInput.trim())
     setPagina(1)
+  }
+
+  async function recategorizar(movId: number, categoriaId: number) {
+    await fetchWithAuth(`/api/movements?id=${movId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ categoria_id: categoriaId }),
+    })
+    setRecategorizando(null)
+    await fetch_()
   }
 
   return (
@@ -124,7 +129,7 @@ export default function MovimientosTab({ mes }: { mes: string }) {
             onChange={e => setFiltroCategoria(e.target.value)}
           >
             <option value="">Todas las categorías</option>
-            {CATEGORIAS.map(c => (
+            {categorias.map(c => (
               <option key={c.id} value={String(c.id)}>{c.emoji} {c.nombre}</option>
             ))}
           </select>
@@ -180,7 +185,25 @@ export default function MovimientosTab({ mes }: { mes: string }) {
                     <tr key={m.id}>
                       <td className="date">{m.fecha}</td>
                       <td>{m.descripcion}</td>
-                      <td>{m.categorias ? `${m.categorias.emoji} ${m.categorias.nombre}` : '—'}</td>
+                      <td>
+                        {recategorizando === m.id ? (
+                          <select
+                            className="cat-select"
+                            autoFocus
+                            defaultValue={String(m.categoria_id ?? '')}
+                            onChange={e => e.target.value && recategorizar(m.id, Number(e.target.value))}
+                            onBlur={() => setRecategorizando(null)}
+                          >
+                            {categorias.map(c => (
+                              <option key={c.id} value={String(c.id)}>{c.emoji} {c.nombre}</option>
+                            ))}
+                          </select>
+                        ) : (
+                          <span style={{ cursor: 'pointer' }} onClick={() => setRecategorizando(m.id)} title="Recategorizar">
+                            {m.categorias ? `${m.categorias.emoji} ${m.categorias.nombre}` : '—'} ✏️
+                          </span>
+                        )}
+                      </td>
                       <td>{m.tarjetas ? `💳 ${m.tarjetas.nombre}` : '💵 Efectivo'}</td>
                       <td className="muted">{m.forma_pago}</td>
                       <td className="muted">{m.origen}</td>

@@ -308,6 +308,21 @@ async def handle_movimiento_callback(
             await _edit_message(chat_id, message_id, "⏭ Saltado por hoy.", token)
         return True
 
+    if parts[0] == "recurrente_editar" and len(parts) == 2:
+        rec_id = int(parts[1])
+        rec = supabase.table("recurrentes").select("descripcion").eq("id", rec_id).eq("usuario_id", user_id).single().execute()
+        if rec.data:
+            supabase.table("recurrentes").update(
+                {"esperando_edicion_monto": True}
+            ).eq("id", rec_id).eq("usuario_id", user_id).execute()
+            if token:
+                await _answer_callback(callback_id, token)
+                await _edit_message(chat_id, message_id,
+                    f"💰 Enviá el nuevo monto para *{rec.data['descripcion']}*:", token)
+        elif token:
+            await _answer_callback(callback_id, token)
+        return True
+
     if parts[0] == "edit" and len(parts) == 2:
         movement_id = int(parts[1])
         row = supabase.table("movimientos").select("descripcion, monto, tipo").eq("id", movement_id).eq("usuario_id", user_id).single().execute()

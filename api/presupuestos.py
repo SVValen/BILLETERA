@@ -18,6 +18,11 @@ async def get_presupuestos(request: Request):
     if err:
         return err
 
+    if request.query_params.get("resource") == "categorias":
+        supabase = get_supabase()
+        r = supabase.table("categorias").select("id, nombre, emoji").order("nombre").execute()
+        return JSONResponse(r.data or [])
+
     mes = request.query_params.get("mes", "")
     if not mes:
         return JSONResponse({"error": "Falta parámetro 'mes'"}, status_code=400)
@@ -79,6 +84,16 @@ async def upsert_presupuesto(request: Request):
         return err
 
     body = await request.json()
+
+    if body.get("resource") == "categorias":
+        nombre = (body.get("nombre") or "").strip()
+        emoji = (body.get("emoji") or "📌").strip()
+        if not nombre:
+            return JSONResponse({"error": "Falta nombre"}, status_code=400)
+        supabase = get_supabase()
+        r = supabase.table("categorias").insert({"nombre": nombre, "emoji": emoji}).execute()
+        return JSONResponse({"ok": True, "data": r.data[0] if r.data else None})
+
     categoria_id = body.get("categoria_id")
     monto = body.get("monto")
     mes = body.get("mes", "")
@@ -120,6 +135,21 @@ async def update_presupuesto(request: Request):
 
     id_ = request.query_params.get("id")
     body = await request.json()
+
+    if body.get("resource") == "categorias":
+        if not id_:
+            return JSONResponse({"error": "Falta id"}, status_code=400)
+        updates = {}
+        if body.get("nombre"):
+            updates["nombre"] = body["nombre"].strip()
+        if body.get("emoji"):
+            updates["emoji"] = body["emoji"].strip()
+        if not updates:
+            return JSONResponse({"error": "Nada para actualizar"}, status_code=400)
+        supabase = get_supabase()
+        r = supabase.table("categorias").update(updates).eq("id", int(id_)).execute()
+        return JSONResponse({"ok": True, "data": r.data[0] if r.data else None})
+
     monto = body.get("monto")
 
     if not id_ or monto is None:

@@ -18,23 +18,11 @@ interface Presupuesto {
   porcentaje: number
 }
 
-const CATEGORIAS = [
-  { id: 1, nombre: 'Supermercado', emoji: '🛒' },
-  { id: 2, nombre: 'Transporte', emoji: '🚗' },
-  { id: 3, nombre: 'Comida', emoji: '🍽️' },
-  { id: 4, nombre: 'Servicios', emoji: '💡' },
-  { id: 5, nombre: 'Entretenimiento', emoji: '🎬' },
-  { id: 6, nombre: 'Salud', emoji: '🏥' },
-  { id: 8, nombre: 'Ropa', emoji: '👕' },
-  { id: 9, nombre: 'Educación', emoji: '📚' },
-  { id: 10, nombre: 'Vivienda', emoji: '🏠' },
-  { id: 11, nombre: 'Mascotas', emoji: '🐾' },
-  { id: 12, nombre: 'Viajes', emoji: '✈️' },
-  { id: 13, nombre: 'Seguros', emoji: '🛡️' },
-  { id: 14, nombre: 'Inversiones', emoji: '💰' },
-  { id: 15, nombre: 'Compras Online', emoji: '💳' },
-  { id: 16, nombre: 'Belleza', emoji: '✨' },
-]
+interface Categoria {
+  id: number
+  nombre: string
+  emoji: string
+}
 
 export default function PresupuestosTab({ mes }: { mes: string }) {
   const [presupuestos, setPresupuestos] = useState<Presupuesto[]>([])
@@ -43,6 +31,7 @@ export default function PresupuestosTab({ mes }: { mes: string }) {
   const [inputMonto, setInputMonto] = useState('')
   const [saving, setSaving] = useState(false)
   const [showAdd, setShowAdd] = useState(false)
+  const [categorias, setCategorias] = useState<Categoria[]>([])
 
   const fetch_ = useCallback(async () => {
     setLoading(true)
@@ -53,6 +42,13 @@ export default function PresupuestosTab({ mes }: { mes: string }) {
   }, [mes])
 
   useEffect(() => { fetch_() }, [fetch_])
+
+  useEffect(() => {
+    fetchWithAuth('/api/presupuestos?resource=categorias')
+      .then(r => r.json())
+      .then(data => setCategorias(Array.isArray(data) ? data : []))
+      .catch(() => {})
+  }, [])
 
   async function guardar() {
     if (!editando || !inputMonto) return
@@ -76,7 +72,7 @@ export default function PresupuestosTab({ mes }: { mes: string }) {
     await fetch_()
   }
 
-  const catsSinPresupuesto = CATEGORIAS.filter(c => !presupuestos.find(p => p.categoria_id === c.id))
+  const catsSinPresupuesto = categorias.filter(c => !presupuestos.find(p => p.categoria_id === c.id))
 
   return (
     <div className="tab-content">
@@ -95,7 +91,7 @@ export default function PresupuestosTab({ mes }: { mes: string }) {
           <select
             className="form-select"
             onChange={e => {
-              const cat = CATEGORIAS.find(c => c.id === +e.target.value)
+              const cat = categorias.find(c => c.id === +e.target.value)
               if (cat) setEditando({ cat_id: cat.id, nombre: cat.nombre, emoji: cat.emoji })
             }}
             defaultValue=""

@@ -25,6 +25,8 @@ def _recurrente_keyboard(rec_id: int) -> dict:
     return {"inline_keyboard": [[
         {"text": "✓ Sí, registrar", "callback_data": f"recurrente_si:{rec_id}"},
         {"text": "✗ No hoy", "callback_data": f"recurrente_no:{rec_id}"},
+    ], [
+        {"text": "✏️ Editar monto", "callback_data": f"recurrente_editar:{rec_id}"},
     ]]}
 
 

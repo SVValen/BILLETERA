@@ -40,7 +40,7 @@ async def get_movements(request: Request):
     supabase = get_supabase()
     query = (
         supabase.table("movimientos")
-        .select("id, fecha, descripcion, monto, tipo, origen, categorias(nombre, emoji), tarjeta_id, es_pago_tarjeta, tarjetas(nombre)", count="exact")
+        .select("id, fecha, descripcion, monto, tipo, origen, categoria_id, categorias(nombre, emoji), tarjeta_id, es_pago_tarjeta, tarjetas(nombre)", count="exact")
         .eq("usuario_id", telegram_id)
         .neq("estado", "anulado")
         .order("fecha", desc=True)
@@ -110,3 +110,31 @@ async def get_movements(request: Request):
         "paginas": max(1, -(-total // PAGE_SIZE)),
         "page_size": PAGE_SIZE,
     })
+
+
+@app.patch("/api/movements")
+async def patch_movement(request: Request):
+    telegram_id, err = await get_telegram_id_from_request(request)
+    if err:
+        return err
+
+    id_ = request.query_params.get("id")
+    if not id_:
+        return JSONResponse({"error": "Falta id"}, status_code=400)
+
+    body = await request.json()
+    categoria_id = body.get("categoria_id")
+    if categoria_id is None:
+        return JSONResponse({"error": "Falta categoria_id"}, status_code=400)
+
+    supabase = get_supabase()
+    r = (
+        supabase.table("movimientos")
+        .update({"categoria_id": int(categoria_id)})
+        .eq("id", int(id_))
+        .eq("usuario_id", telegram_id)
+        .execute()
+    )
+    if not r.data:
+        return JSONResponse({"error": "Movimiento no encontrado"}, status_code=404)
+    return JSONResponse({"ok": True, "data": r.data[0]})
