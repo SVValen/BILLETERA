@@ -448,12 +448,17 @@ async def handle_movimiento_callback(
 
 async def finalizar_pago_tarjeta_unico(
     supabase, user_id: str, mov_id: int, *, chat_id: int, token: str,
-    message_id: int | None = None,
+    message_id: int | None = None, forzar_categoria: bool = False,
 ) -> None:
     """
     Decide el estado final (pendiente_confirmacion / pendiente_categoria / confirmado)
     de un gasto con tarjeta en 1 pago y notifica. Reusado por el callback tar_cuotas
     (message_id seteado, edita el mensaje) y por el flujo de email tipo b (sin message_id, manda uno nuevo).
+
+    forzar_categoria=True (flujo de email): la descripción viene del nombre de comercio del
+    mail, no de texto tipeado por el usuario, así que el keyword matching tiene más riesgo de
+    falso positivo (ej. "delivery" categorizado como "seguros"). Pide confirmación siempre,
+    aunque haya matcheado una categoría que no sea "Otros".
     """
     mov_r = supabase.table("movimientos").select("*").eq("id", mov_id).eq("usuario_id", user_id).single().execute()
     if not mov_r.data:
@@ -475,9 +480,18 @@ async def finalizar_pago_tarjeta_unico(
             f"🤔 Registré *${monto:,.0f}* — ¿está bien o querías decir *${monto * 1000:,.0f}*?",
             _monto_keyboard(mov_id, monto),
         )
-    elif cat_id == 7:
+    elif cat_id == 7 or forzar_categoria:
         supabase.table("movimientos").update({"estado": "pendiente_categoria"}).eq("id", mov_id).execute()
-        await _notify(f"📌 Guardé *${monto:,.0f}* — ¿en qué categoría va *{mov['descripcion']}*?")
+        if forzar_categoria and cat_id != 7:
+            cat_row = supabase.table("categorias").select("nombre, emoji").eq("id", cat_id).single().execute()
+            cat_name = cat_row.data.get("nombre", "Otros") if cat_row.data else "Otros"
+            cat_emoji = cat_row.data.get("emoji", "📌") if cat_row.data else "📌"
+            await _notify(
+                f"🤔 Registré *${monto:,.0f}* en *{mov['descripcion']}* — lo clasifiqué como "
+                f"{cat_emoji} {cat_name}, ¿es correcto? Si no, elegí la categoría:"
+            )
+        else:
+            await _notify(f"📌 Guardé *${monto:,.0f}* — ¿en qué categoría va *{mov['descripcion']}*?")
         await _send(chat_id, "Elegí categoría:", token, parse_mode="", reply_markup=_category_keyboard(mov_id))
     else:
         supabase.table("movimientos").update({"estado": "confirmado"}).eq("id", mov_id).execute()

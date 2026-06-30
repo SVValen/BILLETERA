@@ -152,7 +152,9 @@ async def _procesar_parsed(usuario_id: str, tipo: str, parsed: dict, token: str)
             mov_id = ins.data[0]["id"] if ins.data else None
             if not mov_id:
                 return False, None, None
-            await finalizar_pago_tarjeta_unico(supabase, usuario_id, mov_id, chat_id=chat_id, token=token)
+            await finalizar_pago_tarjeta_unico(
+                supabase, usuario_id, mov_id, chat_id=chat_id, token=token, forzar_categoria=True,
+            )
             return True, mov_id, None
 
         # TIPO_PAGO_CUOTAS — el monto del mail es el total de la compra

@@ -52,6 +52,8 @@ export default function MovimientosTab({ mes }: { mes: string }) {
   const [qInput, setQInput] = useState('')
   const [filtroTipo, setFiltroTipo] = useState<'todos' | 'gasto' | 'ingreso'>('todos')
   const [filtroCategoria, setFiltroCategoria] = useState('')
+  const [fechaDesde, setFechaDesde] = useState('')
+  const [fechaHasta, setFechaHasta] = useState('')
 
   const fetch_ = useCallback(async () => {
     setLoading(true)
@@ -61,6 +63,8 @@ export default function MovimientosTab({ mes }: { mes: string }) {
       if (q) params.set('q', q)
       if (filtroTipo !== 'todos') params.set('tipo', filtroTipo)
       if (filtroCategoria) params.set('categoria_id', filtroCategoria)
+      if (fechaDesde) params.set('fecha_desde', fechaDesde)
+      if (fechaHasta) params.set('fecha_hasta', fechaHasta)
       const r = await fetchWithAuth(`/api/movements?${params}`)
       if (!r.ok) throw new Error('Error al cargar movimientos')
       const data = await r.json()
@@ -72,11 +76,11 @@ export default function MovimientosTab({ mes }: { mes: string }) {
     } finally {
       setLoading(false)
     }
-  }, [mes, pagina, q, filtroTipo, filtroCategoria])
+  }, [mes, pagina, q, filtroTipo, filtroCategoria, fechaDesde, fechaHasta])
 
   useEffect(() => {
     setPagina(1)
-  }, [mes, q, filtroTipo, filtroCategoria])
+  }, [mes, q, filtroTipo, filtroCategoria, fechaDesde, fechaHasta])
 
   useEffect(() => { fetch_() }, [fetch_])
 
@@ -124,6 +128,27 @@ export default function MovimientosTab({ mes }: { mes: string }) {
               <option key={c.id} value={String(c.id)}>{c.emoji} {c.nombre}</option>
             ))}
           </select>
+          <input
+            type="date"
+            className="form-input"
+            value={fechaDesde}
+            max={fechaHasta || undefined}
+            onChange={e => setFechaDesde(e.target.value)}
+            title="Desde"
+          />
+          <input
+            type="date"
+            className="form-input"
+            value={fechaHasta}
+            min={fechaDesde || undefined}
+            onChange={e => setFechaHasta(e.target.value)}
+            title="Hasta"
+          />
+          {(fechaDesde || fechaHasta) && (
+            <button className="btn-ghost" onClick={() => { setFechaDesde(''); setFechaHasta('') }}>
+              ✕ Quitar fechas
+            </button>
+          )}
         </div>
       </div>
 

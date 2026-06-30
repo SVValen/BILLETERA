@@ -14,6 +14,7 @@ app = FastAPI()
 
 PAGE_SIZE = 20
 _CUOTA_RE = re.compile(r"\(cuota (\d+)/(\d+)\)")
+_FECHA_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 @app.get("/api/movements")
@@ -33,6 +34,8 @@ async def get_movements(request: Request):
     categoria_id = request.query_params.get("categoria_id", "").strip()
     tarjeta_id = request.query_params.get("tarjeta_id", "").strip()
     mes_resumen = request.query_params.get("mes_resumen", "").strip()
+    fecha_desde = request.query_params.get("fecha_desde", "").strip()
+    fecha_hasta = request.query_params.get("fecha_hasta", "").strip()
 
     supabase = get_supabase()
     query = (
@@ -44,7 +47,16 @@ async def get_movements(request: Request):
         .order("id", desc=True)
     )
 
-    if mes:
+    if fecha_desde or fecha_hasta:
+        if fecha_desde:
+            if not _FECHA_RE.match(fecha_desde):
+                return JSONResponse({"error": "Formato de fecha_desde inválido (YYYY-MM-DD)"}, status_code=400)
+            query = query.gte("fecha", fecha_desde)
+        if fecha_hasta:
+            if not _FECHA_RE.match(fecha_hasta):
+                return JSONResponse({"error": "Formato de fecha_hasta inválido (YYYY-MM-DD)"}, status_code=400)
+            query = query.lte("fecha", fecha_hasta)
+    elif mes:
         if not validate_mes(mes):
             return JSONResponse({"error": "Formato de mes inválido (YYYY-MM)"}, status_code=400)
         start, end = mes_rango(mes)
