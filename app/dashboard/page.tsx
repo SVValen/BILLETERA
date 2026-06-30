@@ -3,7 +3,8 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { createSupabaseBrowser } from '@/lib/supabase-browser'
-import ResumenTab from './ResumenTab'
+import InicioTab from './InicioTab'
+import DetalleMensualTab from './DetalleMensualTab'
 import PresupuestosTab from './PresupuestosTab'
 import ObjetivosTab from './ObjetivosTab'
 import MovimientosTab from './MovimientosTab'
@@ -11,10 +12,11 @@ import InversionesTab from './InversionesTab'
 import LiquidezTab from './LiquidezTab'
 import PrestamosTab from './PrestamosTab'
 
-type Tab = 'resumen' | 'presupuestos' | 'objetivos' | 'movimientos' | 'inversiones' | 'liquidez' | 'prestamos'
+type Tab = 'inicio' | 'detalle' | 'presupuestos' | 'objetivos' | 'movimientos' | 'inversiones' | 'liquidez' | 'prestamos'
 
 const TABS: { id: Tab; label: string }[] = [
-  { id: 'resumen', label: 'Resumen' },
+  { id: 'inicio', label: 'Inicio' },
+  { id: 'detalle', label: 'Detalle mensual' },
   { id: 'presupuestos', label: 'Presupuestos' },
   { id: 'objetivos', label: 'Objetivos' },
   { id: 'movimientos', label: 'Movimientos' },
@@ -24,7 +26,7 @@ const TABS: { id: Tab; label: string }[] = [
 ]
 
 export default function Dashboard() {
-  const [tab, setTab] = useState<Tab>('resumen')
+  const [tab, setTab] = useState<Tab>('inicio')
   const [mes, setMes] = useState(() => new Date().toISOString().slice(0, 7))
   const [userEmail, setUserEmail] = useState<string | null>(null)
   const [telegramId, setTelegramId] = useState<string | null>(null)
@@ -70,7 +72,7 @@ export default function Dashboard() {
     return <div className="auth-page"><p style={{ color: '#aaa' }}>Verificando sesión...</p></div>
   }
 
-  const showMes = tab === 'resumen' || tab === 'presupuestos' || tab === 'movimientos'
+  const showMes = tab === 'inicio' || tab === 'detalle' || tab === 'presupuestos' || tab === 'movimientos'
 
 
   return (
@@ -107,7 +109,8 @@ export default function Dashboard() {
       </div>
 
       <div className="page">
-        {tab === 'resumen' && <ResumenTab mes={mes} />}
+        {tab === 'inicio' && <InicioTab mes={mes} />}
+        {tab === 'detalle' && <DetalleMensualTab mes={mes} />}
         {tab === 'presupuestos' && <PresupuestosTab mes={mes} />}
         {tab === 'objetivos' && <ObjetivosTab />}
         {tab === 'movimientos' && <MovimientosTab mes={mes} />}

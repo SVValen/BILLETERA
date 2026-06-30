@@ -76,6 +76,78 @@ async def get_stats(request: Request):
         result.sort(key=lambda x: -x["total"])
         return JSONResponse({"mes": mes, "tarjetas": result})
 
+    # ── métricas comparativas vs. mes anterior ──
+    if request.query_params.get("resource") == "metricas":
+        anio, m = (int(x) for x in mes.split("-"))
+        anio_ant, m_ant = (anio - 1, 12) if m == 1 else (anio, m - 1)
+        mes_ant = f"{anio_ant:04d}-{m_ant:02d}"
+
+        def _fetch(mes_q: str):
+            s, e = mes_rango(mes_q)
+            r = (
+                supabase.table("movimientos")
+                .select("monto, tipo, tarjeta_id, es_pago_tarjeta, categorias(nombre, emoji)")
+                .eq("usuario_id", telegram_id)
+                .neq("estado", "anulado")
+                .gte("fecha", s)
+                .lt("fecha", e)
+                .execute()
+            )
+            return r.data or []
+
+        actual = _fetch(mes)
+        anterior = _fetch(mes_ant)
+
+        def _totales(rows):
+            g = sum(r["monto"] for r in rows if r["tipo"] == "gasto")
+            i = sum(r["monto"] for r in rows if r["tipo"] == "ingreso")
+            return g, i
+
+        g_act, i_act = _totales(actual)
+        g_ant, i_ant = _totales(anterior)
+        tasa_ahorro_actual = (i_act - g_act) / i_act * 100 if i_act > 0 else None
+        tasa_ahorro_anterior = (i_ant - g_ant) / i_ant * 100 if i_ant > 0 else None
+
+        def _medio_pago(rows):
+            gastos = [r for r in rows if r["tipo"] == "gasto" and not r.get("es_pago_tarjeta")]
+            total = sum(r["monto"] for r in gastos)
+            if total == 0:
+                return None
+            tarjeta = sum(r["monto"] for r in gastos if r.get("tarjeta_id"))
+            efectivo = total - tarjeta
+            return {"efectivo_pct": round(efectivo / total * 100), "tarjeta_pct": round(tarjeta / total * 100)}
+
+        def _por_categoria(rows):
+            cats: dict[str, dict] = {}
+            for r in rows:
+                if r["tipo"] != "gasto" or r.get("es_pago_tarjeta"):
+                    continue
+                cat = r.get("categorias") or {}
+                nombre = cat.get("nombre", "Otros")
+                emoji = cat.get("emoji", "📌")
+                if nombre not in cats:
+                    cats[nombre] = {"nombre": nombre, "emoji": emoji, "monto": 0.0}
+                cats[nombre]["monto"] += r["monto"]
+            return cats
+
+        cats_act = _por_categoria(actual)
+        cats_ant = _por_categoria(anterior)
+        cambios = []
+        for nombre, c in cats_act.items():
+            ant = cats_ant.get(nombre)
+            if ant and ant["monto"] > 0:
+                pct = (c["monto"] - ant["monto"]) / ant["monto"] * 100
+                cambios.append({"nombre": nombre, "emoji": c["emoji"], "monto": c["monto"], "monto_anterior": ant["monto"], "pct_cambio": round(pct)})
+        cambios.sort(key=lambda x: -abs(x["pct_cambio"]))
+
+        return JSONResponse({
+            "mes": mes,
+            "mes_anterior": mes_ant,
+            "tasa_ahorro": {"actual": tasa_ahorro_actual, "anterior": tasa_ahorro_anterior},
+            "medio_pago": {"actual": _medio_pago(actual), "anterior": _medio_pago(anterior)},
+            "categorias_cambio": cambios[:4],
+        })
+
     start, end = mes_rango(mes)
 
     response = (
