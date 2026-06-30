@@ -27,6 +27,7 @@ function fmtK(v: number | string | undefined | null) {
 interface Stats {
   mes: string
   total_gastos: number
+  total_pagado: number
   total_ingresos: number
   saldo: number
   por_categoria: Record<string, { monto: number; emoji: string }>
@@ -99,15 +100,19 @@ export default function InicioTab({ mes }: { mes: string }) {
   const total = cats.reduce((s, c) => s + c.value, 0)
   const pieData = cats.map(c => ({ ...c, pct: total > 0 ? Math.round(c.value / total * 100) : 0 }))
 
-  const barData = [{ name: mes, Gastos: stats.total_gastos, Ingresos: stats.total_ingresos }]
+  const barData = [{ name: mes, Consumo: stats.total_gastos, Pagado: stats.total_pagado, Ingresos: stats.total_ingresos }]
 
   return (
     <>
       {/* Tarjetas */}
       <div className="cards">
         <div className="card">
-          <p className="card-label">Gastos</p>
+          <p className="card-label" title="Lo que gastaste por categoría, sin importar cuándo se paga">Consumo</p>
           <p className="card-value gasto">{fmt(stats.total_gastos)}</p>
+        </div>
+        <div className="card">
+          <p className="card-label" title="Lo que realmente salió del banco: efectivo + pagos de resumen de tarjeta">Pagado</p>
+          <p className="card-value gasto">{fmt(stats.total_pagado)}</p>
         </div>
         <div className="card">
           <p className="card-label">Ingresos</p>
@@ -171,7 +176,8 @@ export default function InicioTab({ mes }: { mes: string }) {
               <XAxis dataKey="name" tick={{ fontSize: 12 }} />
               <YAxis tickFormatter={fmtK} tick={{ fontSize: 11 }} width={52} />
               <Tooltip formatter={(v) => fmt(v as number)} />
-              <Bar dataKey="Gastos" fill="#ef4444" radius={[6, 6, 0, 0]} label={{ position: 'top', formatter: (v: any) => fmtK(v), fontSize: 11, fill: 'var(--fg2)' }} />
+              <Bar dataKey="Consumo" fill="#f59e0b" radius={[6, 6, 0, 0]} label={{ position: 'top', formatter: (v: any) => fmtK(v), fontSize: 11, fill: 'var(--fg2)' }} />
+              <Bar dataKey="Pagado" fill="#ef4444" radius={[6, 6, 0, 0]} label={{ position: 'top', formatter: (v: any) => fmtK(v), fontSize: 11, fill: 'var(--fg2)' }} />
               <Bar dataKey="Ingresos" fill="#22c55e" radius={[6, 6, 0, 0]} label={{ position: 'top', formatter: (v: any) => fmtK(v), fontSize: 11, fill: 'var(--fg2)' }} />
             </BarChart>
           </ResponsiveContainer>

@@ -152,7 +152,7 @@ async def get_stats(request: Request):
 
     response = (
         supabase.table("movimientos")
-        .select("monto, tipo, categorias(nombre, emoji)")
+        .select("monto, tipo, tarjeta_id, es_pago_tarjeta, categorias(nombre, emoji)")
         .eq("usuario_id", telegram_id)
         .neq("estado", "anulado")
         .gte("fecha", start)
@@ -161,14 +161,23 @@ async def get_stats(request: Request):
     )
 
     rows = response.data or []
-    gastos = [r for r in rows if r["tipo"] == "gasto"]
     ingresos = [r for r in rows if r["tipo"] == "ingreso"]
+    # Consumo: lo que se gastó por categoría, sin contar el pago de resumen
+    # (que ya representa, en otro mes, compras que acá se cuentan una sola vez).
+    consumo = [r for r in rows if r["tipo"] == "gasto" and not r.get("es_pago_tarjeta")]
+    # Flujo de caja: lo que efectivamente salió del banco — efectivo + pagos de
+    # resumen de tarjeta, excluyendo las compras con tarjeta todavía no pagadas.
+    flujo_caja = [
+        r for r in rows
+        if r["tipo"] == "gasto" and (r.get("es_pago_tarjeta") or not r.get("tarjeta_id"))
+    ]
 
-    total_gastos = sum(r["monto"] for r in gastos)
+    total_gastos = sum(r["monto"] for r in consumo)
+    total_pagado = sum(r["monto"] for r in flujo_caja)
     total_ingresos = sum(r["monto"] for r in ingresos)
 
     por_categoria: dict[str, dict] = {}
-    for r in gastos:
+    for r in consumo:
         cat = r.get("categorias") or {}
         nombre = cat.get("nombre", "Otros")
         emoji = cat.get("emoji", "📌")
@@ -179,7 +188,8 @@ async def get_stats(request: Request):
     return JSONResponse({
         "mes": mes,
         "total_gastos": total_gastos,
+        "total_pagado": total_pagado,
         "total_ingresos": total_ingresos,
-        "saldo": total_ingresos - total_gastos,
+        "saldo": total_ingresos - total_pagado,
         "por_categoria": por_categoria,
     })
