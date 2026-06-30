@@ -42,6 +42,8 @@ export default function MovimientosTab({ mes }: { mes: string }) {
   const [fechaHasta, setFechaHasta] = useState('')
   const [categorias, setCategorias] = useState<Categoria[]>([])
   const [recategorizando, setRecategorizando] = useState<number | null>(null)
+  const [totalMontoGasto, setTotalMontoGasto] = useState<number | null>(null)
+  const [totalMontoIngreso, setTotalMontoIngreso] = useState<number | null>(null)
 
   useEffect(() => {
     fetchWithAuth('/api/presupuestos?resource=categorias')
@@ -66,6 +68,8 @@ export default function MovimientosTab({ mes }: { mes: string }) {
       setMovements(data.data || [])
       setTotal(data.total || 0)
       setPaginas(data.paginas || 1)
+      setTotalMontoGasto(data.total_monto_gasto ?? null)
+      setTotalMontoIngreso(data.total_monto_ingreso ?? null)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error desconocido')
     } finally {
@@ -156,6 +160,22 @@ export default function MovimientosTab({ mes }: { mes: string }) {
           )}
         </div>
       </div>
+
+      {/* Totales filtrados */}
+      {(q || filtroCategoria || filtroTipo !== 'todos' || fechaDesde || fechaHasta) && !loading && (
+        <div className="total-filtrado">
+          <span className="total-filtrado-label">🔍 {total} movimiento{total !== 1 ? 's' : ''}</span>
+          {filtroTipo !== 'ingreso' && totalMontoGasto !== null && totalMontoGasto > 0 && (
+            <span><span className="total-filtrado-label">Gastos:</span> <span className="total-filtrado-val gasto">{fmt(totalMontoGasto)}</span></span>
+          )}
+          {filtroTipo !== 'gasto' && totalMontoIngreso !== null && totalMontoIngreso > 0 && (
+            <span><span className="total-filtrado-label">Ingresos:</span> <span className="total-filtrado-val ingreso">{fmt(totalMontoIngreso)}</span></span>
+          )}
+          {filtroTipo === 'todos' && totalMontoIngreso !== null && totalMontoGasto !== null && totalMontoIngreso > 0 && totalMontoGasto > 0 && (
+            <span><span className="total-filtrado-label">Neto:</span> <span className={`total-filtrado-val ${totalMontoIngreso - totalMontoGasto >= 0 ? 'ingreso' : 'gasto'}`}>{fmt(totalMontoIngreso - totalMontoGasto)}</span></span>
+          )}
+        </div>
+      )}
 
       {/* Tabla */}
       <div className="table-box">

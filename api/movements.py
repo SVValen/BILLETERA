@@ -39,6 +39,8 @@ async def get_movements(request: Request):
     fecha_hasta = request.query_params.get("fecha_hasta", "").strip()
 
     supabase = get_supabase()
+
+    # Main query (paginated, with count)
     query = (
         supabase.table("movimientos")
         .select("id, fecha, descripcion, monto, tipo, origen, categoria_id, categorias(nombre, emoji), tarjeta_id, es_pago_tarjeta, tarjetas(nombre)", count="exact")
@@ -47,43 +49,60 @@ async def get_movements(request: Request):
         .order("fecha", desc=True)
         .order("id", desc=True)
     )
+    # Totals query (lightweight, same filters, no pagination)
+    tq = (
+        supabase.table("movimientos")
+        .select("monto, tipo")
+        .eq("usuario_id", telegram_id)
+        .neq("estado", "anulado")
+    )
 
     if fecha_desde or fecha_hasta:
         if fecha_desde:
             if not _FECHA_RE.match(fecha_desde):
                 return JSONResponse({"error": "Formato de fecha_desde inválido (YYYY-MM-DD)"}, status_code=400)
             query = query.gte("fecha", fecha_desde)
+            tq = tq.gte("fecha", fecha_desde)
         if fecha_hasta:
             if not _FECHA_RE.match(fecha_hasta):
                 return JSONResponse({"error": "Formato de fecha_hasta inválido (YYYY-MM-DD)"}, status_code=400)
             query = query.lte("fecha", fecha_hasta)
+            tq = tq.lte("fecha", fecha_hasta)
     elif mes:
         if not validate_mes(mes):
             return JSONResponse({"error": "Formato de mes inválido (YYYY-MM)"}, status_code=400)
         start, end = mes_rango(mes)
         query = query.gte("fecha", start).lt("fecha", end)
+        tq = tq.gte("fecha", start).lt("fecha", end)
 
     if q:
         query = query.ilike("descripcion", f"%{q}%")
+        tq = tq.ilike("descripcion", f"%{q}%")
 
     if tipo in ("gasto", "ingreso"):
         query = query.eq("tipo", tipo)
+        tq = tq.eq("tipo", tipo)
 
     if categoria_id:
         try:
-            query = query.eq("categoria_id", int(categoria_id))
+            cid = int(categoria_id)
+            query = query.eq("categoria_id", cid)
+            tq = tq.eq("categoria_id", cid)
         except ValueError:
             pass
 
     if tarjeta_id:
         try:
-            query = query.eq("tarjeta_id", int(tarjeta_id))
+            tid = int(tarjeta_id)
+            query = query.eq("tarjeta_id", tid)
+            tq = tq.eq("tarjeta_id", tid)
         except ValueError:
             pass
 
     if mes_resumen:
         if validate_mes(mes_resumen):
             query = query.eq("mes_resumen", mes_resumen)
+            tq = tq.eq("mes_resumen", mes_resumen)
 
     if not todos:
         offset = (pagina - 1) * PAGE_SIZE
@@ -91,6 +110,16 @@ async def get_movements(request: Request):
 
     response = query.execute()
     total = response.count or 0
+
+    if todos:
+        # All data already fetched; compute totals from it directly
+        all_rows = response.data or []
+        total_monto_gasto = sum(r["monto"] for r in all_rows if r["tipo"] == "gasto")
+        total_monto_ingreso = sum(r["monto"] for r in all_rows if r["tipo"] == "ingreso")
+    else:
+        t_resp = tq.execute()
+        total_monto_gasto = sum(r["monto"] for r in (t_resp.data or []) if r["tipo"] == "gasto")
+        total_monto_ingreso = sum(r["monto"] for r in (t_resp.data or []) if r["tipo"] == "ingreso")
 
     data = response.data or []
     for r in data:
@@ -110,6 +139,8 @@ async def get_movements(request: Request):
         "pagina": pagina,
         "paginas": max(1, -(-total // PAGE_SIZE)),
         "page_size": PAGE_SIZE,
+        "total_monto_gasto": total_monto_gasto,
+        "total_monto_ingreso": total_monto_ingreso,
     })
 
 
