@@ -152,7 +152,9 @@ RSI (14 períodos) sobre histórico CoinGecko (crypto, hourly) / IOL (acciones, 
 `tna_mensual = tna_caucion / 12`. `devaluacion_mensual = Δ dólar_MEP 30d`. `carry = tna_mensual - devaluacion`. carry > 2% → ENTRAR; 0–2% → Claude evalúa; < 0% → SALIR a USD.
 
 ### Tarjetas y mes de resumen (Fase 5)
-`calcular_mes_resumen(fecha_compra, dia_cierre)`: si `dia(fecha_compra) <= dia_cierre` → mismo mes; sino → mes siguiente.
+`calcular_mes_resumen(fecha_compra, dia_cierre)`: representa el mes en que el usuario ve y paga ese resumen, no el mes en que cierra el ciclo. Si `dia(fecha_compra) <= dia_cierre` → mes siguiente al de la compra; sino → dos meses después de la compra. Ej. cierre día 28: compra 13/06 (≤28) → `mes_resumen=2026-07`; compra 29/06 (>28) → `mes_resumen=2026-08`.
+
+(Corregido 2026-06-30 — la regla original etiquetaba erróneamente con el mes de cierre del ciclo en vez del mes de pago; se migró el histórico completo de `movimientos.mes_resumen` +1 mes.)
 
 Flujo de registro de gasto con tarjeta: `_process_text` → detecta tarjetas activas → guarda con `estado='pendiente_tarjeta'` → botones [Efectivo][Tarjeta…] → callback `pago_tar:{mov_id}:{tarjeta_id_o_0}` → aplica tarjeta + mes_resumen + finaliza (monto_bajo / categoria / confirmado).
 
