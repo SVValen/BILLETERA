@@ -1,6 +1,6 @@
 # ARCHITECTURE.md — Billetera
 > Snapshot técnico. Actualizar con /snapshot --update tras cambios significativos.
-> Última actualización: 2026-06-29 (Fase 6b — préstamos, pago de resumen de tarjeta)
+> Última actualización: 2026-06-30 (rediseño dashboard — tabs Inicio / Detalle mensual)
 
 ## Archivos clave
 
@@ -13,7 +13,8 @@
 
 ### Dashboard (Next.js)
 - `app/dashboard/page.tsx` — shell: auth check, selector de mes, dark mode, delega a tabs
-- `app/dashboard/ResumenTab.tsx` — tarjetas gasto/ingreso/saldo, PieChart donut + BarChart, cuotas (con `?mes=`), recurrentes
+- `app/dashboard/InicioTab.tsx` — cards gasto/ingreso/saldo, PieChart donut + BarChart, widget "📊 Comparado con el mes pasado" (tasa de ahorro, split efectivo/tarjeta, variación por categoría vs. mes anterior)
+- `app/dashboard/DetalleMensualTab.tsx` — resumen de tarjetas del mes (con detalle expandible por tarjeta, filtrado por `mes_resumen`), cuotas en proceso, próximos recurrentes
 - `app/dashboard/PresupuestosTab.tsx` — presupuestos por categoría vs. gasto real del mes
 - `app/dashboard/MovimientosTab.tsx` — tabla de movimientos con filtros; editar/borrar
 - `app/dashboard/ObjetivosTab.tsx` — objetivos de ahorro
@@ -45,12 +46,12 @@
 - `api/cron_rf.py` — L-V 15:00 UTC (GitHub Actions): TNA/precios RF + carry trade + alertas vencimientos
 
 ### Endpoints del dashboard
-- `api/stats.py` — `GET /api/stats?mes=YYYY-MM`: gastos/ingresos por categoría. `GET ?resource=tarjetas`: total a pagar por tarjeta del mes (cuotas + 1 pago) y estado de pago
+- `api/stats.py` — `GET /api/stats?mes=YYYY-MM`: gastos/ingresos por categoría. `GET ?resource=tarjetas`: total a pagar por tarjeta del mes (cuotas + 1 pago) y estado de pago. `GET ?resource=metricas`: tasa de ahorro, split efectivo/tarjeta y variación por categoría, comparados contra el mes anterior (excluye siempre `es_pago_tarjeta=TRUE`)
 - `api/cuotas.py` — `GET /api/cuotas?mes=YYYY-MM`: cuotas activas con progreso (respeta `cuota_inicio`)
 - `api/recurrentes.py` — `GET /api/recurrentes?dias=N`: próximos recurrentes
 - `api/presupuestos.py` — CRUD de presupuestos
 - `api/objetivos.py` — CRUD de objetivos de ahorro
-- `api/movements.py` — lectura/edición de movimientos; incluye `tarjeta_id`/`tarjetas(nombre)`/`forma_pago` (derivado: "Pago resumen" / "Cuota X/N" / "1 pago" / "—")
+- `api/movements.py` — lectura/edición de movimientos; incluye `tarjeta_id`/`tarjetas(nombre)`/`forma_pago` (derivado: "Pago resumen" / "Cuota X/N" / "1 pago" / "—"); filtros opcionales `tarjeta_id` y `mes_resumen` (además de `mes`, que filtra por `fecha`)
 - `api/inversiones.py` — `GET ?resource=portafolios|perfil|activos|recomendaciones|decisiones|liquidez|allocation|instrumentos_rf`
 
 ### Librerías Python
@@ -175,7 +176,7 @@ Modelo de contabilidad (decisión explícita del usuario): una compra con tarjet
 
 Flujo: `handle_pagar_tarjeta_cmd()` → por cada tarjeta activa, `_calcular_total_tarjeta()` suma cuotas (patrón `(cuota X/N)`) + compras en 1 pago con `mes_resumen` = mes actual, excluyendo movimientos `es_pago_tarjeta=TRUE` y pagos ya registrados en `tarjeta_pagos` para ese mes → botones [Confirmar monto][Editar monto] → `pagtar_confirmar:{tarjeta_id}:{mes}:{monto}` o `pagtar_editar:{tarjeta_id}:{mes}:{monto_calculado}` (inserta fila `tarjeta_pagos` con `monto_pagado=NULL` como marcador y espera el monto por texto, mismo patrón que `colchon_mensual.tope_variable`) → `handle_pagar_tarjeta_text()` detecta la fila pendiente → `_registrar_pago_tarjeta()` inserta el movimiento gasto y hace upsert en `tarjeta_pagos` (`on_conflict` por `usuario_id, tarjeta_id, mes_resumen`).
 
-`api/stats.py?resource=tarjetas` expone el mismo cálculo para el dashboard (widget en `ResumenTab.tsx`), excluyendo siempre `es_pago_tarjeta=TRUE` para no contar el pago contra sí mismo.
+`api/stats.py?resource=tarjetas` expone el mismo cálculo para el dashboard (widget en `DetalleMensualTab.tsx`), excluyendo siempre `es_pago_tarjeta=TRUE` para no contar el pago contra sí mismo. El detalle expandible de cada tarjeta filtra movimientos por `mes_resumen` (no `fecha`) vía `GET /api/movements?mes_resumen=&tarjeta_id=`, para que coincida con el agrupamiento del resumen.
 
 ### Movimientos: estados
 `estado` en `movimientos`: `confirmado` | `pendiente_confirmacion` (monto < $1000) | `pendiente_edicion_monto` | `pendiente_categoria` | `pendiente_tarjeta` (esperando elección de medio de pago).
