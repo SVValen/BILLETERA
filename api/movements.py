@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 from lib.supabase_client import get_supabase
 from lib.auth import get_telegram_id_from_request
 from lib.date_utils import mes_rango, validate_mes
+from api.bot.helpers import _save_learned_keywords
 
 app = FastAPI()
 
@@ -137,4 +138,9 @@ async def patch_movement(request: Request):
     )
     if not r.data:
         return JSONResponse({"error": "Movimiento no encontrado"}, status_code=404)
+
+    descripcion = r.data[0].get("descripcion", "")
+    if descripcion:
+        await _save_learned_keywords(descripcion, int(categoria_id), telegram_id)
+
     return JSONResponse({"ok": True, "data": r.data[0]})
