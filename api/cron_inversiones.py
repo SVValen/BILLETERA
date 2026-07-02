@@ -125,7 +125,7 @@ async def _ya_tiene_recomendacion_pendiente(usuario_id: str, activo_id: int, sup
 async def cron_inversiones(request: Request, job: str = ""):
     # Validar CRON_SECRET
     cron_secret = os.getenv("CRON_SECRET", "")
-    if cron_secret and request.headers.get("authorization") != f"Bearer {cron_secret}":
+    if not cron_secret or request.headers.get("authorization") != f"Bearer {cron_secret}":
         return JSONResponse({"error": "unauthorized"}, status_code=401)
 
     # Despachar jobs alternativos via ?job=

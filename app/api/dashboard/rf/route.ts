@@ -42,8 +42,17 @@ export async function GET(req: NextRequest) {
 
     if (posError) throw posError
 
-    // Obtener dólar MEP (simplificado - en producción usar API)
-    let dolar_mep = 1400 // Valor default
+    // Obtener dólar MEP desde dolarapi
+    let dolar_mep = 1400
+    try {
+      const dolarRes = await fetch('https://dolarapi.com/v1/dolares/bolsa', { next: { revalidate: 300 } })
+      if (dolarRes.ok) {
+        const dolarData = await dolarRes.json()
+        dolar_mep = dolarData.venta ?? dolarData.compra ?? 1400
+      }
+    } catch {
+      // dolarapi no disponible — usar valor de fallback
+    }
 
     // Obtener carry trade
     const { data: caucion } = await supabase

@@ -335,20 +335,35 @@ async def inversiones_post(request: Request):
         prestamo_id = prest_r.data[0]["id"]
 
         rows = []
-        for f in filas:
+        for idx, f in enumerate(filas):
+            try:
+                numero_cuota = int(f["numero_cuota"])
+            except (KeyError, ValueError, TypeError):
+                supabase.table("prestamos").delete().eq("id", prestamo_id).execute()
+                return JSONResponse({"error": f"Fila {idx}: 'numero_cuota' inválido ({f.get('numero_cuota')!r})"}, status_code=400)
+            try:
+                capital = float(str(f.get("capital", 0)).replace(",", ""))
+            except (ValueError, TypeError):
+                supabase.table("prestamos").delete().eq("id", prestamo_id).execute()
+                return JSONResponse({"error": f"Fila {idx}: 'capital' inválido ({f.get('capital')!r})"}, status_code=400)
             pagado = f.get("pagado", False)
             if isinstance(pagado, str):
                 pagado = pagado.lower() in ("true", "1", "si", "sí", "yes")
-            capital = float(str(f.get("capital", 0)).replace(",", ""))
             monto_ord = f.get("monto_ordinario")
-            monto_ord = float(str(monto_ord).replace(",", "")) if monto_ord else None
+            try:
+                monto_ord = float(str(monto_ord).replace(",", "")) if monto_ord else None
+            except (ValueError, TypeError):
+                monto_ord = None
             monto_pagado = f.get("monto_pagado")
-            monto_pagado = float(str(monto_pagado).replace(",", "")) if monto_pagado else None
+            try:
+                monto_pagado = float(str(monto_pagado).replace(",", "")) if monto_pagado else None
+            except (ValueError, TypeError):
+                monto_pagado = None
             rows.append({
                 "prestamo_id": prestamo_id,
                 "usuario_id": telegram_id,
-                "numero_cuota": int(f["numero_cuota"]),
-                "mes_previsto": str(f["mes"])[:7],
+                "numero_cuota": numero_cuota,
+                "mes_previsto": str(f.get("mes", ""))[:7],
                 "capital": capital,
                 "monto_ordinario": monto_ord,
                 "monto_adelanto": round(capital * 1.25, 2),

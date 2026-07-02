@@ -38,7 +38,10 @@ async def get_cuotas(request: Request):
 
     result = []
     for p in (rows.data or []):
-        primera = date.fromisoformat(p["fecha_primera_cuota"])
+        try:
+            primera = date.fromisoformat(p["fecha_primera_cuota"])
+        except (ValueError, TypeError):
+            continue
         n = p["num_cuotas"]
         cuota_inicio = p.get("cuota_inicio", 1)
 
