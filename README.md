@@ -42,24 +42,50 @@ ai-review-framework/
 └── commands/
     ├── review.md                 # Orquesta la revisión completa
     ├── update-context.md         # Actualiza el contexto de negocio (AGENTS.md)
-    └── snapshot.md               # Genera el mapa técnico del proyecto (ARCHITECTURE.md)
+    ├── snapshot.md                # Genera el mapa técnico del proyecto (ARCHITECTURE.md)
+    ├── install.md                 # Instala el framework de punta a punta (remote, subtree, wrappers, AGENTS.md)
+    └── sync-commands.md           # Sincroniza wrappers después de un subtree pull
 ```
 
 ## Integración en un proyecto
 
-### 1. Agregar el remote
+### Bootstrap (sin crear nada a mano)
+
+Abrí Claude Code en el proyecto destino y pedile directamente, en un solo mensaje:
+
+```
+Instalá el framework ai-review-framework desde
+https://github.com/SVValen/ai-review-framework.git en este proyecto.
+```
+
+No hace falta crear ningún archivo vos mismo: Claude no necesita que el wrapper
+de `/install` exista de antemano para seguir esas instrucciones — puede leer
+`commands/install.md` de este repo y ejecutar sus pasos directamente. Va a:
+
+1. Verificar que el working tree esté limpio y confirmar contigo antes de tocar git.
+2. Agregar el remote y el subtree (`.review/`).
+3. Crear todos los wrappers en `.claude/commands/` (incluido el de `/install`, para
+   que en el futuro también puedas invocarlo como slash command normal).
+4. Crear `.claude/agents/` y `.claude/reports/`.
+5. Explorar el codebase (`package.json`, `README.md`, `.env.example`, estructura de
+   carpetas) y proponerte un `AGENTS.md`, mostrándotelo antes de escribirlo.
+6. Crear `CLAUDE.md` con `@AGENTS.md`.
+7. Ofrecerte correr `/snapshot` para generar `ARCHITECTURE.md` en el mismo momento.
+
+Cada paso que modifica el repo o sobrescribe un archivo existente pide confirmación
+explícita antes de aplicarse — no corre nada destructivo en silencio.
+
+Una vez instalado, para sesiones futuras (o si preferís invocarlo como slash command)
+alcanza con escribir `/install` directamente, ya que el wrapper queda creado.
+
+### Instalación manual (referencia, paso a paso)
+
+Si por algún motivo preferís hacer cada paso vos mismo en lugar de pedírselo a Claude:
 
 ```bash
 git remote add ai-review-framework https://github.com/SVValen/ai-review-framework.git
-```
-
-### 2. Agregar el subtree
-
-```bash
 git subtree add --prefix=.review ai-review-framework main --squash
 ```
-
-### 3. Crear los wrappers de comandos
 
 Crear `.claude/commands/review.md`:
 
@@ -95,8 +121,6 @@ Los agentes están en `.review/agents/`.
 El contexto del proyecto está en `AGENTS.md`.
 ```
 
-### 4. Crear el contexto del proyecto
-
 Crear `AGENTS.md` en la raíz del proyecto con esta estructura:
 
 ```markdown
@@ -125,7 +149,7 @@ Crear `CLAUDE.md` en la raíz:
 @AGENTS.md
 ```
 
-### 5. Crear carpetas de soporte
+Crear carpetas de soporte:
 
 ```bash
 mkdir -p .claude/agents .claude/reports
@@ -176,6 +200,25 @@ Una vez generado, Claude lo carga automáticamente en cada sesión sin explorar 
 /snapshot            # Genera ARCHITECTURE.md completo
 /snapshot --update   # Actualiza solo las secciones afectadas por cambios recientes
 ```
+
+### `/install`
+
+Instala el framework de punta a punta: remote, subtree, wrappers de comandos,
+carpetas de soporte, `AGENTS.md` y `CLAUDE.md`. Ver "Bootstrap" más arriba —
+la primera vez no hace falta que exista el wrapper, se le puede pedir directo a Claude.
+
+```
+/install
+/install https://github.com/usuario/fork.git   # remote propio o fork
+```
+
+Explora el codebase para proponer un `AGENTS.md` inicial y muestra el contenido antes
+de escribirlo. Cada acción sobre git o sobre archivos existentes pide confirmación.
+
+### `/sync-commands`
+
+Detecta comandos nuevos del framework sin wrapper local y los crea. Correr después
+de cada `git subtree pull`.
 
 ## Flujo de trabajo recomendado
 
