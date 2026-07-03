@@ -30,7 +30,6 @@ const TABS: { id: Tab; label: string }[] = [
 export default function Dashboard() {
   const [tab, setTab] = useState<Tab>('inicio')
   const [mes, setMes] = useState(() => new Date().toISOString().slice(0, 7))
-  const [userEmail, setUserEmail] = useState<string | null>(null)
   const [telegramId, setTelegramId] = useState<string | null>(null)
   const [dark, setDark] = useState(false)
   const router = useRouter()
@@ -41,10 +40,9 @@ export default function Dashboard() {
       const supabase = createSupabaseBrowser()
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) { router.push('/login'); return }
-      setUserEmail(user.email ?? null)
       const { data: perfil } = await supabase
         .from('perfiles').select('telegram_id').eq('id', user.id).single()
-      if (!perfil?.telegram_id) { router.push('/configurar'); return }
+      if (!perfil?.telegram_id) { router.push('/login'); return }
       setTelegramId(perfil.telegram_id)
     }
     checkAuth()
@@ -86,7 +84,7 @@ export default function Dashboard() {
           <button className="btn-icon" onClick={toggleDark} title={dark ? 'Modo claro' : 'Modo oscuro'}>
             {dark ? '☀️' : '🌙'}
           </button>
-          <span className="nav-email">{userEmail}</span>
+          <span className="nav-email">{telegramId}</span>
           <button className="nav-logout" onClick={handleLogout}>Salir</button>
         </div>
       </div>
