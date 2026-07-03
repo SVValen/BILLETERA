@@ -297,6 +297,45 @@ def is_income_by_keywords(text: str) -> bool:
     return any(kw in text_lower for kw in INCOME_KEYWORDS)
 
 
+_INGRESO_KW_RE = re.compile(
+    r"\b(ingres[oóeé]|cobr[eé]|sueldo|salario|aguinaldo|honorarios|bono)\b\s+(.*)"
+)
+_NUM_RE = r"[\d]+(?:[.,]\d+)?"
+
+
+def _parse_ingreso_flexible(cleaned_lower: str) -> dict | None:
+    """Detecta ingreso por keyword, con el monto antes o después de la descripción.
+
+    Ejemplos:
+      "sueldo 80000"                 → monto=80000, descripcion="sueldo"
+      "ingreso 50000 freelance"      → monto=50000, descripcion="freelance"
+      "sueldo unitech 10000"         → monto=10000, descripcion="unitech"
+      "ingreso extra mama 100000"    → monto=100000, descripcion="extra mama"
+    """
+    m = _INGRESO_KW_RE.search(cleaned_lower)
+    if not m:
+        return None
+    keyword, rest = m.group(1), m.group(2).strip()
+    if not rest:
+        return None
+
+    # Monto al inicio: "ingreso 50000 freelance"
+    m_start = re.match(rf"({_NUM_RE})\s*(.*)$", rest)
+    if m_start:
+        monto = float(m_start.group(1).replace(",", "."))
+        descripcion = m_start.group(2).strip() or keyword
+        return {"monto": monto, "descripcion": descripcion, "tipo": "ingreso"}
+
+    # Monto al final: "sueldo unitech 10000" / "ingreso extra mama 100000"
+    m_end = re.match(rf"(.+?)\s+({_NUM_RE})$", rest)
+    if m_end:
+        monto = float(m_end.group(2).replace(",", "."))
+        descripcion = m_end.group(1).strip() or keyword
+        return {"monto": monto, "descripcion": descripcion, "tipo": "ingreso"}
+
+    return None
+
+
 def parse_movement(text: str) -> dict | None:
     """Parsea un mensaje y extrae monto, descripción y tipo.
 
@@ -304,44 +343,33 @@ def parse_movement(text: str) -> dict | None:
     - "Gasté 25000 en supermercado"
     - "gaste 25.000 supermercado"
     - "25000 supermercado"
-    - "Ingreso 50000 sueldo"
-    - "sueldo 80000"  ← auto-detectado como ingreso
+    - "Ingreso 50000 sueldo" / "ingreso extra mama 100000"
+    - "sueldo 80000" / "sueldo unitech 10000"  ← auto-detectado como ingreso
     """
     text = text.strip()
     # Normalizar separadores de miles: 25.000 → 25000
     cleaned = re.sub(r"(\d)\.(\d{3})\b", r"\1\2", text)
+    cleaned_lower = cleaned.lower()
 
-    patterns = [
-        (r"gast[eé]\s+([\d]+(?:[.,]\d+)?)\s+(?:en\s+)?(.+)", "gasto"),
-        (r"ingres[oóeé]\s+([\d]+(?:[.,]\d+)?)\s*(.*)", "ingreso"),
-        (r"cobr[eé]\s+([\d]+(?:[.,]\d+)?)\s*(.*)", "ingreso"),
-        (r"(sueldo|salario|aguinaldo|bono|honorarios)\s+([\d]+(?:[.,]\d+)?)\s*(.*)", "ingreso_kw"),
-        (r"([\d]+(?:[.,]\d+)?)\s+(.+)", "gasto"),
-    ]
+    # 1. Gasto explícito: "gasté 25000 en supermercado"
+    match = re.search(r"gast[eé]\s+([\d]+(?:[.,]\d+)?)\s+(?:en\s+)?(.+)", cleaned_lower)
+    if match:
+        monto = float(match.group(1).replace(",", "."))
+        descripcion = (match.group(2) or text).strip() or text
+        tipo = "ingreso" if is_income_by_keywords(descripcion) else "gasto"
+        return {"monto": monto, "descripcion": descripcion, "tipo": tipo}
 
-    for pattern, tipo_base in patterns:
-        match = re.search(pattern, cleaned.lower())
-        if not match:
-            continue
+    # 2. Ingreso / cobro / sueldo, con el monto antes o después de la descripción
+    ingreso = _parse_ingreso_flexible(cleaned_lower)
+    if ingreso:
+        return ingreso
 
-        if tipo_base == "ingreso_kw":
-            keyword = match.group(1)
-            raw_monto = match.group(2).replace(",", ".")
-            descripcion = (match.group(3) or keyword).strip() or keyword
-            tipo = "ingreso"
-        else:
-            raw_monto = match.group(1).replace(",", ".")
-            descripcion = ((match.group(2) if match.lastindex >= 2 else "") or text).strip()
-            tipo = tipo_base
-
-        monto = float(raw_monto)
-        if not descripcion:
-            descripcion = text
-
-        # Auto-promover a ingreso si la descripción contiene palabras clave de ingreso
-        if tipo == "gasto" and is_income_by_keywords(descripcion):
-            tipo = "ingreso"
-
+    # 3. Fallback genérico: "25000 supermercado"
+    match = re.search(r"([\d]+(?:[.,]\d+)?)\s+(.+)", cleaned_lower)
+    if match:
+        monto = float(match.group(1).replace(",", "."))
+        descripcion = (match.group(2) or text).strip() or text
+        tipo = "ingreso" if is_income_by_keywords(descripcion) else "gasto"
         return {"monto": monto, "descripcion": descripcion, "tipo": tipo}
 
     return None
