@@ -39,6 +39,7 @@
 - `api/telegram.py` — webhook principal; delega a `dispatcher.py`
 - `api/bot/dispatcher.py` — cadena de routing (orden crítico): `handle_wizard_text` → `handle_plan_renta_text` → `handle_colchon_text` → `handle_pagar_tarjeta_text` → **`handle_recurrente_text`** → `parse_aporte`/`handle_aporte` → comandos `/...` → `_parse_posicion_rf` → `_process_text` (fallback). Aplicada en ambas ramas (texto plano y transcripción de voz)
 - `api/bot/handlers/recurrentes.py` — `_registrar_recurrente()` para nuevo recurrente vía texto libre; `handle_recurrente_text()` captura monto editado cuando `esperando_edicion_monto=TRUE`, actualiza `recurrentes.monto` base y registra movimiento del día
+- `api/bot/handlers/transferencias.py` — `handle_transferencia_text()`: captura la descripción libre de una transferencia detectada por mail (`estado='pendiente_descripcion_transferencia'`), categoriza y confirma o pide categoría con botones
 - `api/bot/helpers.py` — `_save_learned_keywords(descripcion, categoria_id, usuario_id)`: extrae palabras ≥4 chars, filtra stop words, upsert en `keywords_aprendidas`; `_categorize()`: hardcoded + keywords aprendidas; importado también desde `api/movements.py`
 - `api/bot/handlers/movimientos.py` — `_process_text`: parser principal de gastos/ingresos; `_save_and_confirm()` y `finalizar_pago_tarjeta_unico()` (compartido con sync IMAP)
 - `api/bot/handlers/wizard_inversion.py` — wizard de portafolio + `_sugerir_instrumentos_rf()`
@@ -67,7 +68,7 @@
 - `lib/rf_analysis.py` — `analizar_carry_trade()`, `calcular_rendimiento_usd()`, `calcular_allocation()`
 - `lib/tarjetas.py` — `calcular_mes_resumen(fecha_compra, dia_cierre)`: mes en que el usuario paga, no el mes de cierre del ciclo (corrección 2026-06-30)
 - `lib/auth.py` — `get_telegram_id_from_request()` para endpoints Python del dashboard
-- `lib/email_parser_santander.py` — clasifica y parsea 4 tipos de mail Santander
+- `lib/email_parser_santander.py` — clasifica y parsea 5 tipos de mail Santander (débito automático, pago 1 pago, pago cuotas, débito, transferencia)
 - `lib/gmail_sync.py` — `sync_gmail_all_users()`: polling IMAP, dedup por `Message-ID`, routing por tipo de mail
 
 ### CSS / Design system
@@ -110,6 +111,7 @@ Patrón recurrente para capturar texto libre después de un callback:
 - `tarjeta_pagos.monto_pagado IS NULL` → `handle_pagar_tarjeta_text`
 - `recurrentes.esperando_edicion_monto = TRUE` → `handle_recurrente_text`
 - `tarjeta_last4_map.tarjeta_id IS NULL` → resolución IMAP via `last4_tar` callback
+- `movimientos.estado = 'pendiente_descripcion_transferencia'` → `handle_transferencia_text` (transferencias detectadas por mail, sin comercio)
 
 Cada handler retorna `bool` y se llama en orden en `dispatch_message` antes del parser de movimientos.
 
@@ -145,7 +147,7 @@ Sin middleware Next.js para proteger datos. Verificación en cada Client Compone
 ## Trabajo en curso
 
 ### Funcionalidades recientes (activas y estables)
-- **Auto-registro IMAP Santander** (`lib/gmail_sync.py` + `lib/email_parser_santander.py`): polling cada 20 min, 4 tipos de mail, resolución de last4 via `tarjeta_last4_map`
+- **Auto-registro IMAP Santander** (`lib/gmail_sync.py` + `lib/email_parser_santander.py`): polling cada 20 min, 5 tipos de mail (incluye transferencias enviadas, registradas como efectivo con descripción pendiente), resolución de last4 via `tarjeta_last4_map`
 - **Gestión de categorías desde el dashboard** (`CategoriasTab.tsx` + `api/presupuestos.py?resource=categorias`)
 - **Recategorización con aprendizaje** (`MovimientosTab.tsx` + `movements.py` PATCH): corregir categorías desde la tabla y propagar keywords
 - **Edición de monto de recurrentes** (`handlers/recurrentes.py` + `cron.py`): 3er botón "Editar monto"; actualiza monto base hacia adelante

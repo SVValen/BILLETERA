@@ -20,6 +20,7 @@ from .handlers.tarjetas import (
 )
 from .handlers.colchon import handle_colchon_cmd, handle_colchon_nuevo_cmd, handle_colchon_callback, handle_colchon_text
 from .handlers.recurrentes import handle_recurrente_text
+from .handlers.transferencias import handle_transferencia_text
 from .handlers.prestamos import handle_prestamo_callback, handle_prestamos_cmd, detect_prestamo_text
 from .handlers.objetivos import handle_objetivo_nuevo_cmd, handle_objetivos_cmd, handle_objetivo_conectar_cmd, handle_objetivo_callback
 from lib.parser import parse_aporte
@@ -95,6 +96,8 @@ async def dispatch_message(message: dict, token: str) -> None:
             return
         if await handle_recurrente_text(transcribed, user_id, chat_id, token):
             return
+        if await handle_transferencia_text(transcribed, user_id, chat_id, token):
+            return
         aporte_parsed = parse_aporte(transcribed)
         if aporte_parsed:
             await handle_aporte(aporte_parsed, user_id, chat_id, token)
@@ -118,6 +121,8 @@ async def dispatch_message(message: dict, token: str) -> None:
         if await handle_pagar_tarjeta_text(text, user_id, chat_id, token):
             return
         if await handle_recurrente_text(text, user_id, chat_id, token):
+            return
+        if await handle_transferencia_text(text, user_id, chat_id, token):
             return
         aporte_parsed = parse_aporte(text)
         if aporte_parsed:

@@ -1,12 +1,16 @@
 """
-Parsing de los 4 tipos de mail de aviso de Santander (Fase 1):
+Parsing de los 5 tipos de mail de aviso de Santander (Fase 1):
   a) débito automático en tarjeta de crédito (ej. suscripciones USD)
   b) pago con tarjeta de crédito en 1 pago
   c) pago con tarjeta de crédito en cuotas
   d) pago con tarjeta de débito
+  e) transferencia enviada
 
-Todos comparten el mismo layout de campos (Monto / Cuotas / Comercio / Fecha / Hora),
+Los tipos a-d comparten el mismo layout de campos (Monto / Cuotas / Comercio / Fecha / Hora),
 con o sin saltos de línea entre el label y el valor según el cliente de mail.
+
+El tipo e) (transferencia) tiene un layout distinto (Destinatario / Cuenta de origen /
+CBU de Destino / Importe / Número de comprobante) y no trae comercio ni fecha explícita.
 """
 import re
 from datetime import date
@@ -15,18 +19,23 @@ TIPO_DEBITO_AUTOMATICO = "debito_automatico"
 TIPO_PAGO_1_PAGO = "pago_1_pago"
 TIPO_PAGO_CUOTAS = "pago_cuotas"
 TIPO_PAGO_DEBITO = "pago_debito"
+TIPO_TRANSFERENCIA = "transferencia"
 
 _RE_LAST4 = re.compile(r"terminada en\s*(\d{4})", re.IGNORECASE)
 _RE_MONTO = re.compile(r"Monto\s*(U\$S|\$)\s*([\d.,]+)", re.IGNORECASE)
 _RE_CUOTAS = re.compile(r"Cuotas\s*(\d+)", re.IGNORECASE)
 _RE_COMERCIO = re.compile(r"Comercio\s*(.+?)\s*(?=Fecha)", re.IGNORECASE)
 _RE_FECHA = re.compile(r"Fecha\s*(\d{2}/\d{2}/\d{4})", re.IGNORECASE)
+_RE_IMPORTE = re.compile(r"Importe\s*\$\s*([\d.,]+)", re.IGNORECASE)
 
 
 def identificar_tipo_email(subject: str, body: str) -> str | None:
     """Identifica el tipo de mail de Santander según subject/body. None si no matchea ninguno."""
     texto = f"{subject}\n{body}"
     texto_low = texto.lower()
+
+    if "transferencia" in texto_low and "cbu" in texto_low:
+        return TIPO_TRANSFERENCIA
 
     if "débito automático" in texto_low:
         return TIPO_DEBITO_AUTOMATICO
@@ -60,7 +69,22 @@ def parse_email(tipo: str, subject: str, body: str) -> dict | None:
     campos requeridos (mail con formato inesperado).
     Campos: monto (float), moneda ('ARS'|'USD'), descripcion (str), fecha (ISO str),
     last4 (str de 4 dígitos), num_cuotas (int, solo para TIPO_PAGO_CUOTAS).
+
+    TIPO_TRANSFERENCIA no trae comercio/last4/fecha en el mail (solo destinatario/CBU) —
+    descripcion y fecha quedan en None; el llamador los completa (bot pregunta descripción,
+    cron usa la fecha del mail).
     """
+    if tipo == TIPO_TRANSFERENCIA:
+        importe_m = _RE_IMPORTE.search(body)
+        if not importe_m:
+            return None
+        return {
+            "monto": _parse_monto_ar(importe_m.group(1)),
+            "moneda": "ARS",
+            "descripcion": None,
+            "fecha": None,
+        }
+
     last4_m = _RE_LAST4.search(body)
     monto_m = _RE_MONTO.search(body)
     comercio_m = _RE_COMERCIO.search(body)

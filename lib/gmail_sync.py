@@ -6,6 +6,11 @@ remitente de Santander: identifica el tipo, lo parsea, y lo rutea al mismo flujo
 confirmación de Telegram que ya existe para gastos tipeados a mano. Nunca registra
 nada en silencio. Dedup por Message-ID en `email_procesados`.
 
+El mail de transferencia (TIPO_TRANSFERENCIA) no trae comercio, así que se registra
+como efectivo con estado 'pendiente_descripcion_transferencia' y el bot le pregunta al
+usuario la descripción por Telegram antes de categorizar (mismo patrón sentinel que
+`esperando_edicion_monto` / `tope_variable IS NULL`).
+
 Nunca loguear monto, descripción ni body crudo del mail (regla de AGENTS.md) — solo
 contadores/tipos/usuario_id.
 """
@@ -19,7 +24,7 @@ from lib.supabase_client import get_supabase
 from lib.tarjetas import calcular_mes_resumen
 from lib.email_parser_santander import (
     identificar_tipo_email, parse_email,
-    TIPO_DEBITO_AUTOMATICO, TIPO_PAGO_1_PAGO, TIPO_PAGO_CUOTAS, TIPO_PAGO_DEBITO,
+    TIPO_DEBITO_AUTOMATICO, TIPO_PAGO_1_PAGO, TIPO_PAGO_CUOTAS, TIPO_PAGO_DEBITO, TIPO_TRANSFERENCIA,
 )
 from api.bot.tg import _send, _get_dolar_oficial
 from api.bot.keyboards import _cuota_fecha_keyboard
@@ -180,6 +185,26 @@ async def _procesar_parsed(usuario_id: str, tipo: str, parsed: dict, token: str)
             reply_markup=_cuota_fecha_keyboard(plan_id),
         )
         return True, None, plan_id
+
+    if tipo == TIPO_TRANSFERENCIA:
+        ins = supabase.table("movimientos").insert({
+            "usuario_id": usuario_id,
+            "fecha": date.today().isoformat(),
+            "monto": parsed["monto"],
+            "tipo": "gasto",
+            "origen": "email",
+            "estado": "pendiente_descripcion_transferencia",
+        }).execute()
+        mov_id = ins.data[0]["id"] if ins.data else None
+        if not mov_id:
+            return False, None, None
+        await _send(
+            chat_id,
+            f"💸 Detecté una transferencia de *${parsed['monto']:,.0f}* — la registré como efectivo, "
+            "¿qué descripción le pongo?",
+            token,
+        )
+        return True, mov_id, None
 
     # TIPO_DEBITO_AUTOMATICO / TIPO_PAGO_DEBITO — todo lo que no es tarjeta de crédito se registra como efectivo
     monto = parsed["monto"]
