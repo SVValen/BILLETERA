@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import { fetchWithAuth } from '@/lib/fetch-with-auth'
+import { BilleteraButton } from '@/app/components/design'
 
 function fmt(n: number) {
   return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(n)
@@ -79,9 +80,9 @@ export default function PresupuestosTab({ mes }: { mes: string }) {
       <div className="section-header">
         <h2 className="section-title">Presupuestos — {mes}</h2>
         {catsSinPresupuesto.length > 0 && (
-          <button className="btn-primary" onClick={() => setShowAdd(!showAdd)}>
+          <BilleteraButton variant="primary" onClick={() => setShowAdd(!showAdd)}>
             + Agregar
-          </button>
+          </BilleteraButton>
         )}
       </div>
 
@@ -110,12 +111,12 @@ export default function PresupuestosTab({ mes }: { mes: string }) {
               value={inputMonto}
               onChange={e => setInputMonto(e.target.value)}
             />
-            <button className="btn-primary" onClick={guardar} disabled={saving || !editando || !inputMonto}>
+            <BilleteraButton variant="primary" onClick={guardar} disabled={saving || !editando || !inputMonto}>
               {saving ? '...' : 'Guardar'}
-            </button>
-            <button className="btn-ghost" onClick={() => { setShowAdd(false); setEditando(null); setInputMonto('') }}>
+            </BilleteraButton>
+            <BilleteraButton variant="ghost" onClick={() => { setShowAdd(false); setEditando(null); setInputMonto('') }}>
               Cancelar
-            </button>
+            </BilleteraButton>
           </div>
         </div>
       )}
@@ -150,8 +151,8 @@ export default function PresupuestosTab({ mes }: { mes: string }) {
                   <div className="form-row" style={{ marginTop: 8 }}>
                     <input className="form-input" type="number" value={inputMonto}
                       onChange={e => setInputMonto(e.target.value)} />
-                    <button className="btn-primary" onClick={guardar} disabled={saving}>{saving ? '...' : 'Guardar'}</button>
-                    <button className="btn-ghost" onClick={() => { setEditando(null); setInputMonto('') }}>✕</button>
+                    <BilleteraButton variant="primary" onClick={guardar} disabled={saving}>{saving ? '...' : 'Guardar'}</BilleteraButton>
+                    <BilleteraButton variant="ghost" onClick={() => { setEditando(null); setInputMonto('') }}>✕</BilleteraButton>
                   </div>
                 ) : (
                   <>

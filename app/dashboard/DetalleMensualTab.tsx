@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import { fetchWithAuth } from '@/lib/fetch-with-auth'
+import { BilleteraAlert, BilleteraBadge } from '@/app/components/design'
 
 function fmt(n: number) {
   return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(n)
@@ -105,7 +106,7 @@ export default function DetalleMensualTab({ mes }: { mes: string }) {
   }, [expanded, detalle, mes])
 
   if (loading) return <p className="loading">Cargando...</p>
-  if (error) return <div className="error-banner">{error}</div>
+  if (error) return <BilleteraAlert variant="danger" title="Error">{error}</BilleteraAlert>
 
   const totalPendiente = tarjetas.filter(t => !t.pagado).reduce((s, t) => s + t.total, 0)
   const totalPagado = tarjetas.filter(t => t.pagado).reduce((s, t) => s + (t.monto_pagado ?? t.total), 0)
@@ -154,13 +155,13 @@ export default function DetalleMensualTab({ mes }: { mes: string }) {
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       {t.pagado ? (
                         <>
-                          <span className="badge badge-ok">✅ Pagado</span>
-                          <span style={{ fontWeight: 800, fontSize: 15, color: '#22c55e' }}>{fmt(t.monto_pagado ?? 0)}</span>
+                          <BilleteraBadge variant="green">✅ Pagado</BilleteraBadge>
+                          <span style={{ fontWeight: 800, fontSize: 15, color: 'var(--b-green)' }}>{fmt(t.monto_pagado ?? 0)}</span>
                           {t.fecha_pago && <span style={{ fontSize: 12, color: 'var(--fg3)' }}>{t.fecha_pago}</span>}
                         </>
                       ) : (
                         <>
-                          <span className="badge badge-pending">⏳ Pendiente</span>
+                          <BilleteraBadge variant="gold">⏳ Pendiente</BilleteraBadge>
                           <span style={{ fontWeight: 800, fontSize: 15 }}>{fmt(t.total)}</span>
                         </>
                       )}
@@ -233,7 +234,7 @@ export default function DetalleMensualTab({ mes }: { mes: string }) {
                   <div className="cuota-header">
                     <span className="cuota-desc">{c.emoji} {c.descripcion}</span>
                     <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                      {esUltima && <span className="badge badge-last">🏁 Última</span>}
+                      {esUltima && <BilleteraBadge variant="gold">🏁 Última</BilleteraBadge>}
                       <span className="cuota-monto">{fmt(c.monto_cuota)}/mes</span>
                     </div>
                   </div>
@@ -263,9 +264,9 @@ export default function DetalleMensualTab({ mes }: { mes: string }) {
                 <span className="recurrente-desc">{r.emoji} {r.descripcion}</span>
                 <span className="recurrente-fecha">
                   {r.dias_faltan === 0
-                    ? <span className="badge badge-alert">Hoy</span>
+                    ? <BilleteraBadge variant="red">Hoy</BilleteraBadge>
                     : r.dias_faltan === 1
-                    ? <span className="badge badge-pending">Mañana</span>
+                    ? <BilleteraBadge variant="gold">Mañana</BilleteraBadge>
                     : `en ${r.dias_faltan}d`}
                 </span>
                 <span className="recurrente-monto">{fmt(r.monto)}</span>

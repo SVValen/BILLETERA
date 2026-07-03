@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { createSupabaseBrowser } from '@/lib/supabase-browser'
+import { BilleteraButton } from '@/app/components/design'
 import InicioTab from './InicioTab'
 import DetalleMensualTab from './DetalleMensualTab'
 import PresupuestosTab from './PresupuestosTab'
@@ -85,7 +86,7 @@ export default function Dashboard() {
             {dark ? '☀️' : '🌙'}
           </button>
           <span className="nav-email">{telegramId}</span>
-          <button className="nav-logout" onClick={handleLogout}>Salir</button>
+          <BilleteraButton variant="ghost" size="sm" onClick={handleLogout}>Salir</BilleteraButton>
         </div>
       </div>
 

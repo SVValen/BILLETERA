@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import { fetchWithAuth } from '@/lib/fetch-with-auth'
+import { BilleteraButton } from '@/app/components/design'
 
 interface Categoria {
   id: number
@@ -64,7 +65,7 @@ export default function CategoriasTab() {
     <div className="tab-content">
       <div className="section-header">
         <h2 className="section-title">Categorías</h2>
-        <button className="btn-primary" onClick={() => setShowForm(!showForm)}>+ Nueva</button>
+        <BilleteraButton variant="primary" onClick={() => setShowForm(!showForm)}>+ Nueva</BilleteraButton>
       </div>
 
       {showForm && (
@@ -82,10 +83,10 @@ export default function CategoriasTab() {
             </div>
           </div>
           <div className="form-row" style={{ marginTop: 12 }}>
-            <button className="btn-primary" onClick={crearCategoria} disabled={saving}>
+            <BilleteraButton variant="primary" onClick={crearCategoria} disabled={saving}>
               {saving ? '...' : 'Crear categoría'}
-            </button>
-            <button className="btn-ghost" onClick={() => setShowForm(false)}>Cancelar</button>
+            </BilleteraButton>
+            <BilleteraButton variant="ghost" onClick={() => setShowForm(false)}>Cancelar</BilleteraButton>
           </div>
         </div>
       )}
@@ -119,10 +120,10 @@ export default function CategoriasTab() {
                             onChange={e => setEditForm(f => ({ ...f, nombre: e.target.value }))} />
                         </td>
                         <td className="right">
-                          <button className="btn-primary" onClick={() => guardarEdit(c.id)} disabled={saving}>
+                          <BilleteraButton variant="primary" size="sm" onClick={() => guardarEdit(c.id)} disabled={saving}>
                             {saving ? '...' : 'Guardar'}
-                          </button>
-                          <button className="btn-ghost" onClick={() => setEditId(null)}>✕</button>
+                          </BilleteraButton>
+                          <BilleteraButton variant="ghost" size="sm" onClick={() => setEditId(null)}>✕</BilleteraButton>
                         </td>
                       </>
                     ) : (

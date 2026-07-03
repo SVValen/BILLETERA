@@ -1,3 +1,5 @@
+@import './components/design/tokens.css';
+
 /* ── Variables (light / dark) ────────────────────────────────────────────── */
 :root {
   --bg:       #f0f2f7;

@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import { fetchWithAuth } from '@/lib/fetch-with-auth'
+import { BilleteraButton, BilleteraAlert } from '@/app/components/design'
 
 function fmtUSD(n: number) {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n)
@@ -148,7 +149,11 @@ export default function InversionesTab() {
   }
 
   if (loading) return <div className="loading">Cargando inversiones...</div>
-  if (error) return <div className="error-banner">{error} <button className="btn-ghost" onClick={fetchData}>Reintentar</button></div>
+  if (error) return (
+    <BilleteraAlert variant="danger" title="Error">
+      {error} <BilleteraButton variant="ghost" size="sm" onClick={fetchData} style={{ marginTop: 8 }}>Reintentar</BilleteraButton>
+    </BilleteraAlert>
+  )
 
   if (portafolios.length === 0) {
     return (
@@ -242,22 +247,22 @@ export default function InversionesTab() {
                       </div>
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flexShrink: 0 }}>
-                      <button
-                        className="btn-primary"
-                        style={{ padding: '6px 14px', fontSize: 13 }}
+                      <BilleteraButton
+                        variant="primary"
+                        size="sm"
                         disabled={decidiendo === rec.id}
                         onClick={() => decidir(rec.id, 'aceptada')}
                       >
                         ✅ Aceptar
-                      </button>
-                      <button
-                        className="btn-ghost"
-                        style={{ padding: '6px 14px', fontSize: 13 }}
+                      </BilleteraButton>
+                      <BilleteraButton
+                        variant="ghost"
+                        size="sm"
                         disabled={decidiendo === rec.id}
                         onClick={() => decidir(rec.id, 'rechazada')}
                       >
                         ❌ Rechazar
-                      </button>
+                      </BilleteraButton>
                     </div>
                   </div>
                 </div>

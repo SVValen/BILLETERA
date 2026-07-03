@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { fetchWithAuth } from '@/lib/fetch-with-auth'
+import { BilleteraAlert } from '@/app/components/design'
 import {
   PieChart, Pie, Cell, Tooltip,
   BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer,
@@ -89,7 +90,7 @@ export default function InicioTab({ mes }: { mes: string }) {
   }, [mes])
 
   if (loading) return <p className="loading">Cargando...</p>
-  if (error) return <div className="error-banner">{error}</div>
+  if (error) return <BilleteraAlert variant="danger" title="Error">{error}</BilleteraAlert>
   if (!stats) return null
 
   // Categorías ordenadas por monto desc

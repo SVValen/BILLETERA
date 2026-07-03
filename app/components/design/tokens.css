@@ -1,0 +1,101 @@
+/* ============================================================
+   BILLETERA — Design Tokens
+   Paleta extraída del personaje "Billetero" (benteveo mascota).
+   Importar en globals.css antes de cualquier otro CSS.
+   ============================================================ */
+
+:root {
+  /* ── Paleta base ──────────────────────────────────────────── */
+  --b-navy:       #0D2B3E;   /* fondo oscuro, texto principal */
+  --b-teal:       #3CA0A0;   /* acción primaria, links, borders de énfasis */
+  --b-teal-lt:    #5BBFBF;   /* hover de teal, fondos suaves activos */
+  --b-teal-bg:    #EAF5F5;   /* fondo tenue teal (alerts info, badges) */
+  --b-gold:       #F0C83C;   /* CTA secundario, highlights, moneda */
+  --b-gold-dk:    #C49A14;   /* texto sobre fondo oro, bordes oro */
+  --b-gold-bg:    #FEF4CC;   /* fondo tenue oro (badges, warnings) */
+  --b-green:      #286450;   /* chaleco, éxito, pagado */
+  --b-green-bg:   #E5F5ED;   /* fondo tenue verde (success alerts) */
+  --b-cream:      #F5F3E8;   /* fondo suave general, fondo mascota */
+  --b-cream-dk:   #E8E3D0;   /* bordes sobre crema */
+  --b-ivory:      #F0F0DC;   /* pecho del benteveo, variante crema */
+  --b-gray:       #8C8C8C;   /* texto secundario, iconos inactivos */
+  --b-gray-lt:    #E8E8E8;   /* bordes sutiles, separadores */
+  --b-red:        #C0392B;   /* alerta crítica, exceso de presupuesto */
+  --b-red-bg:     #FDEDEB;   /* fondo tenue rojo (danger alerts) */
+  --b-white:      #FFFFFF;   /* fondos de cards */
+
+  /* ── Tipografía ───────────────────────────────────────────── */
+  --font-display: var(--font-syne), 'Syne', 'Inter', sans-serif;
+  --font-body:    var(--font-inter), 'Inter', system-ui, sans-serif;
+  --font-mono:    'JetBrains Mono', 'Fira Code', monospace;
+
+  /* ── Escala tipográfica ───────────────────────────────────── */
+  --text-display:  clamp(28px, 5vw, 40px);
+  --text-heading:  20px;
+  --text-title:    16px;
+  --text-body:     14px;
+  --text-caption:  12px;
+  --text-tiny:     11px;
+
+  /* ── Espaciado ────────────────────────────────────────────── */
+  --space-xs:   4px;
+  --space-sm:   8px;
+  --space-md:   12px;
+  --space-lg:   16px;
+  --space-xl:   24px;
+  --space-2xl:  32px;
+  --space-3xl:  48px;
+
+  /* ── Border radius ────────────────────────────────────────── */
+  --radius-sm:   4px;
+  --radius-md:   8px;
+  --radius-lg:   12px;
+  --radius-xl:   16px;
+  --radius-pill: 999px;
+
+  /* ── Sombras ──────────────────────────────────────────────── */
+  --shadow-sm:  0 1px 3px rgba(13, 43, 62, 0.08);
+  --shadow-md:  0 4px 12px rgba(13, 43, 62, 0.10);
+  --shadow-lg:  0 8px 24px rgba(13, 43, 62, 0.14);
+
+  /* ── Bordes ───────────────────────────────────────────────── */
+  --border-default: 0.5px solid var(--b-gray-lt);
+  --border-strong:  1px solid #D0D0D0;
+  --border-teal:    1.5px solid var(--b-teal);
+  --border-gold:    1.5px solid var(--b-gold);
+
+  /* ── Animaciones ──────────────────────────────────────────── */
+  --dur-fast:   100ms;
+  --dur-base:   200ms;
+  --dur-slow:   350ms;
+  --ease-out:   cubic-bezier(0.0, 0, 0.2, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  /* ── Semánticos (alias) ───────────────────────────────────── */
+  --color-action:   var(--b-teal);
+  --color-cta:      var(--b-gold);
+  --color-success:  var(--b-green);
+  --color-danger:   var(--b-red);
+  --color-text:     var(--b-navy);
+  --color-muted:    var(--b-gray);
+  --color-bg:       var(--b-cream);
+  --color-surface:  var(--b-white);
+}
+
+/* ── Dark mode ────────────────────────────────────────────────
+   El dashboard usa toggle manual (clase html.dark), igual que
+   el resto de globals.css — sin @media prefers-color-scheme.  */
+html.dark {
+  --b-navy:    #E8F0F4;
+  --b-cream:   #0F1E28;
+  --b-white:   #152535;
+  --b-gray-lt: #1E3347;
+  --b-gray:    #6B8899;
+  --b-teal-bg: #0D2830;
+  --b-gold-bg: #1F1A06;
+  --b-green-bg:#061510;
+  --b-red-bg:  #1A0A09;
+}
+
+/* ── Reset mínimo ─────────────────────────────────────────────  */
+*, *::before, *::after { box-sizing: border-box; }

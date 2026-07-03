@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import { fetchWithAuth } from '@/lib/fetch-with-auth'
+import { BilleteraButton, BilleteraAlert } from '@/app/components/design'
 
 function fmt(n: number) {
   return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(n)
@@ -115,8 +116,8 @@ export default function MovimientosTab({ mes }: { mes: string }) {
             onChange={e => setQInput(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && buscar()}
           />
-          <button className="btn-primary" onClick={buscar}>Buscar</button>
-          {q && <button className="btn-ghost" onClick={() => { setQ(''); setQInput('') }}>✕ Limpiar</button>}
+          <BilleteraButton variant="primary" onClick={buscar}>Buscar</BilleteraButton>
+          {q && <BilleteraButton variant="ghost" onClick={() => { setQ(''); setQInput('') }}>✕ Limpiar</BilleteraButton>}
         </div>
         <div className="filtros-row">
           <div className="tipo-filter">
@@ -154,9 +155,9 @@ export default function MovimientosTab({ mes }: { mes: string }) {
             title="Hasta"
           />
           {(fechaDesde || fechaHasta) && (
-            <button className="btn-ghost" onClick={() => { setFechaDesde(''); setFechaHasta('') }}>
+            <BilleteraButton variant="ghost" onClick={() => { setFechaDesde(''); setFechaHasta('') }}>
               ✕ Quitar fechas
-            </button>
+            </BilleteraButton>
           )}
         </div>
       </div>
@@ -180,7 +181,9 @@ export default function MovimientosTab({ mes }: { mes: string }) {
       {/* Tabla */}
       <div className="table-box">
         {error ? (
-          <div className="error-banner">{error} <button className="btn-ghost" onClick={fetch_}>Reintentar</button></div>
+          <BilleteraAlert variant="danger" title="Error">
+            {error} <BilleteraButton variant="ghost" size="sm" onClick={fetch_} style={{ marginTop: 8 }}>Reintentar</BilleteraButton>
+          </BilleteraAlert>
         ) : loading ? (
           <p className="loading">Cargando...</p>
         ) : movements.length === 0 ? (
@@ -239,13 +242,13 @@ export default function MovimientosTab({ mes }: { mes: string }) {
             {/* Paginación */}
             {paginas > 1 && (
               <div className="paginacion">
-                <button className="btn-ghost" disabled={pagina === 1} onClick={() => setPagina(p => p - 1)}>
+                <BilleteraButton variant="ghost" disabled={pagina === 1} onClick={() => setPagina(p => p - 1)}>
                   ← Anterior
-                </button>
+                </BilleteraButton>
                 <span className="muted">{pagina} / {paginas}</span>
-                <button className="btn-ghost" disabled={pagina === paginas} onClick={() => setPagina(p => p + 1)}>
+                <BilleteraButton variant="ghost" disabled={pagina === paginas} onClick={() => setPagina(p => p + 1)}>
                   Siguiente →
-                </button>
+                </BilleteraButton>
               </div>
             )}
           </>

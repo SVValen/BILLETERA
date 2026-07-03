@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import { fetchWithAuth } from '@/lib/fetch-with-auth'
+import { BilleteraButton } from '@/app/components/design'
 
 function fmt(n: number) {
   return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(n)
@@ -81,7 +82,7 @@ export default function ObjetivosTab() {
     <div className="tab-content">
       <div className="section-header">
         <h2 className="section-title">Objetivos de ahorro</h2>
-        <button className="btn-primary" onClick={() => setShowForm(!showForm)}>+ Nuevo</button>
+        <BilleteraButton variant="primary" onClick={() => setShowForm(!showForm)}>+ Nuevo</BilleteraButton>
       </div>
 
       {showForm && (
@@ -104,10 +105,10 @@ export default function ObjetivosTab() {
             </div>
           </div>
           <div className="form-row" style={{ marginTop: 12 }}>
-            <button className="btn-primary" onClick={crearObjetivo} disabled={saving}>
+            <BilleteraButton variant="primary" onClick={crearObjetivo} disabled={saving}>
               {saving ? '...' : 'Crear objetivo'}
-            </button>
-            <button className="btn-ghost" onClick={() => setShowForm(false)}>Cancelar</button>
+            </BilleteraButton>
+            <BilleteraButton variant="ghost" onClick={() => setShowForm(false)}>Cancelar</BilleteraButton>
           </div>
         </div>
       )}
@@ -164,14 +165,14 @@ export default function ObjetivosTab() {
                   <div className="form-row">
                     <input className="form-input" type="number" placeholder="Monto a aportar"
                       value={aporteVal} onChange={e => setAporteVal(e.target.value)} style={{ width: 140 }} />
-                    <button className="btn-primary" onClick={() => aportar(obj.id)} disabled={saving}>
+                    <BilleteraButton variant="primary" size="sm" onClick={() => aportar(obj.id)} disabled={saving}>
                       {saving ? '...' : 'Aportar'}
-                    </button>
-                    <button className="btn-ghost" onClick={() => { setAporteId(null); setAporteVal('') }}>✕</button>
+                    </BilleteraButton>
+                    <BilleteraButton variant="ghost" size="sm" onClick={() => { setAporteId(null); setAporteVal('') }}>✕</BilleteraButton>
                   </div>
                 ) : (
                   obj.porcentaje < 100 && (
-                    <button className="btn-primary" onClick={() => setAporteId(obj.id)}>+ Aportar</button>
+                    <BilleteraButton variant="primary" size="sm" onClick={() => setAporteId(obj.id)}>+ Aportar</BilleteraButton>
                   )
                 )}
               </div>

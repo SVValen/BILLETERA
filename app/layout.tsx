@@ -1,5 +1,9 @@
 import type { Metadata, Viewport } from 'next'
+import { Syne, Inter } from 'next/font/google'
 import './globals.css'
+
+const syne = Syne({ subsets: ['latin'], weight: ['700', '800'], variable: '--font-syne' })
+const inter = Inter({ subsets: ['latin'], weight: ['400', '500', '600'], variable: '--font-inter' })
 
 export const metadata: Metadata = {
   title: 'Billetera',
@@ -13,7 +17,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="es">
+    <html lang="es" className={`${syne.variable} ${inter.variable}`}>
       <body>{children}</body>
     </html>
   )

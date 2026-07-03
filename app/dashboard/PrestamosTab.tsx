@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import * as XLSX from 'xlsx'
 import { fetchWithAuth } from '@/lib/fetch-with-auth'
+import { BilleteraButton, BilleteraBadge, BilleteraAlert } from '@/app/components/design'
 
 // ── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -144,10 +145,10 @@ function parseSheet(ws: XLSX.WorkSheet): { rows: CuotaRow[]; errors: ParseError[
 
 // ── Estilos ──────────────────────────────────────────────────────────────────
 
-const th: React.CSSProperties = { padding: '6px 10px', textAlign: 'left', fontWeight: 600, border: '1px solid var(--border, #e0e0e0)', fontSize: 12 }
-const td: React.CSSProperties = { padding: '5px 10px', border: '1px solid var(--border, #e0e0e0)', fontSize: 12 }
-const codeStyle: React.CSSProperties = { background: 'var(--border, #eee)', padding: '1px 5px', borderRadius: 3, fontFamily: 'monospace', fontSize: 11 }
-const card: React.CSSProperties = { background: 'var(--card-bg, #f8f9fa)', border: '1px solid var(--border, #e0e0e0)', borderRadius: 10, padding: '16px 20px', marginBottom: 16 }
+const th: React.CSSProperties = { padding: '6px 10px', textAlign: 'left', fontWeight: 600, border: '1px solid var(--b-gray-lt)', fontSize: 12 }
+const td: React.CSSProperties = { padding: '5px 10px', border: '1px solid var(--b-gray-lt)', fontSize: 12 }
+const codeStyle: React.CSSProperties = { background: 'var(--b-cream)', padding: '1px 5px', borderRadius: 3, fontFamily: 'var(--font-mono)', fontSize: 11 }
+const card: React.CSSProperties = { background: 'var(--b-white)', border: '0.5px solid var(--b-gray-lt)', borderRadius: 'var(--radius-lg)', padding: '16px 20px', marginBottom: 16 }
 
 // ── Vista de cuotas ──────────────────────────────────────────────────────────
 
@@ -174,22 +175,20 @@ function CuotasView({ prestamo, onBack }: { prestamo: Prestamo; onBack: () => vo
     <div>
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
-        <button onClick={onBack} style={{ background: 'none', border: '1px solid var(--border,#ccc)', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 13 }}>
-          ← Volver
-        </button>
+        <BilleteraButton variant="ghost" size="sm" onClick={onBack}>← Volver</BilleteraButton>
         <h2 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>🏦 {prestamo.nombre}</h2>
       </div>
 
       {/* Stats cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12, marginBottom: 20 }}>
         {[
-          { label: 'Cuotas pagadas', value: `${prestamo.cuotas_pagadas} / ${prestamo.total_cuotas_real}`, color: '#065f46' },
-          { label: 'Avance', value: `${pct}%`, color: '#1d4ed8' },
-          { label: 'Total abonado', value: `$${fmt(totalPagado)}`, color: '#065f46' },
-          { label: 'Saldo pendiente', value: `$${fmt(totalPendiente)}`, color: '#991b1b' },
+          { label: 'Cuotas pagadas', value: `${prestamo.cuotas_pagadas} / ${prestamo.total_cuotas_real}`, color: 'var(--b-green)' },
+          { label: 'Avance', value: `${pct}%`, color: 'var(--b-teal)' },
+          { label: 'Total abonado', value: `$${fmt(totalPagado)}`, color: 'var(--b-green)' },
+          { label: 'Saldo pendiente', value: `$${fmt(totalPendiente)}`, color: 'var(--b-red)' },
         ].map(s => (
           <div key={s.label} style={{ ...card, marginBottom: 0, textAlign: 'center' }}>
-            <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>{s.label}</div>
+            <div style={{ fontSize: 11, color: 'var(--b-gray)', marginBottom: 4 }}>{s.label}</div>
             <div style={{ fontSize: 18, fontWeight: 700, color: s.color }}>{s.value}</div>
           </div>
         ))}
@@ -201,8 +200,8 @@ function CuotasView({ prestamo, onBack }: { prestamo: Prestamo; onBack: () => vo
           <span>{prestamo.cuotas_pagadas} pagadas</span>
           <span>{prestamo.cuotas_pendientes} pendientes</span>
         </div>
-        <div style={{ background: '#e5e7eb', borderRadius: 6, height: 10, overflow: 'hidden' }}>
-          <div style={{ background: '#2563eb', height: '100%', width: `${pct}%`, borderRadius: 6, transition: 'width 0.4s' }} />
+        <div style={{ background: 'var(--b-gray-lt)', borderRadius: 6, height: 10, overflow: 'hidden' }}>
+          <div style={{ background: 'var(--b-teal)', height: '100%', width: `${pct}%`, borderRadius: 6, transition: 'width 0.4s' }} />
         </div>
         {prestamo.proxima && (
           <div style={{ marginTop: 10, fontSize: 13 }}>
@@ -210,28 +209,27 @@ function CuotasView({ prestamo, onBack }: { prestamo: Prestamo; onBack: () => vo
             {prestamo.proxima.monto_ordinario ? ` — $${fmt(prestamo.proxima.monto_ordinario)}` : ''}
           </div>
         )}
-        {!prestamo.proxima && <div style={{ marginTop: 10, fontSize: 13, color: '#065f46', fontWeight: 600 }}>🎉 ¡Préstamo cancelado!</div>}
+        {!prestamo.proxima && <div style={{ marginTop: 10, fontSize: 13, color: 'var(--b-green)', fontWeight: 600 }}>🎉 ¡Préstamo cancelado!</div>}
       </div>
 
       {/* Filtros */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
         {(['todas', 'pagadas', 'pendientes'] as const).map(f => (
-          <button key={f} onClick={() => setFiltro(f)}
-            style={{ padding: '4px 14px', borderRadius: 6, border: '1px solid var(--border,#ccc)', cursor: 'pointer', fontWeight: filtro === f ? 700 : 400, background: filtro === f ? '#2563eb' : 'transparent', color: filtro === f ? '#fff' : 'inherit', fontSize: 13 }}>
+          <BilleteraButton key={f} variant={filtro === f ? 'primary' : 'ghost'} size="sm" onClick={() => setFiltro(f)}>
             {f.charAt(0).toUpperCase() + f.slice(1)}
-          </button>
+          </BilleteraButton>
         ))}
-        <span style={{ marginLeft: 'auto', fontSize: 12, color: '#888', alignSelf: 'center' }}>{visible.length} cuotas</span>
+        <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--b-gray)', alignSelf: 'center' }}>{visible.length} cuotas</span>
       </div>
 
       {/* Tabla */}
       {loading ? (
-        <p style={{ color: '#888', textAlign: 'center', padding: 24 }}>Cargando cuotas…</p>
+        <p style={{ color: 'var(--b-gray)', textAlign: 'center', padding: 24 }}>Cargando cuotas…</p>
       ) : (
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
-              <tr style={{ background: 'var(--border, #e8e8e8)' }}>
+              <tr style={{ background: 'var(--b-cream)' }}>
                 {['#', 'Mes', 'Estado', 'Capital', 'Ordinario', 'Adelanto (×1.25)', 'Tipo pago', 'Monto pagado', 'Fecha pago'].map(h => (
                   <th key={h} style={th}>{h}</th>
                 ))}
@@ -239,17 +237,17 @@ function CuotasView({ prestamo, onBack }: { prestamo: Prestamo; onBack: () => vo
             </thead>
             <tbody>
               {visible.map(c => (
-                <tr key={c.id} style={{ background: c.pagado ? 'var(--success-bg, #f0fff4)' : undefined }}>
+                <tr key={c.id} style={{ background: c.pagado ? 'var(--b-green-bg)' : undefined }}>
                   <td style={td}>{c.numero_cuota}</td>
                   <td style={td}>{c.mes_previsto}</td>
                   <td style={{ ...td, textAlign: 'center' }}>
                     {c.pagado
-                      ? <span style={{ color: '#065f46', fontWeight: 600 }}>✅ Pagada</span>
-                      : <span style={{ color: '#92400e' }}>⏳ Pendiente</span>}
+                      ? <BilleteraBadge variant="green">✅ Pagada</BilleteraBadge>
+                      : <BilleteraBadge variant="gold">⏳ Pendiente</BilleteraBadge>}
                   </td>
                   <td style={{ ...td, textAlign: 'right' }}>${fmt(c.capital)}</td>
                   <td style={{ ...td, textAlign: 'right' }}>{c.monto_ordinario ? `$${fmt(c.monto_ordinario)}` : '—'}</td>
-                  <td style={{ ...td, textAlign: 'right', color: '#2563eb' }}>${fmt(c.capital * 1.25)}</td>
+                  <td style={{ ...td, textAlign: 'right', color: 'var(--b-teal)' }}>${fmt(c.capital * 1.25)}</td>
                   <td style={td}>{c.tipo_pago ?? '—'}</td>
                   <td style={{ ...td, textAlign: 'right' }}>{c.monto_pagado ? `$${fmt(c.monto_pagado)}` : '—'}</td>
                   <td style={td}>{c.fecha_pago ?? '—'}</td>
@@ -345,24 +343,22 @@ export default function PrestamosTab() {
       {/* Título */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
         <h2 style={{ fontSize: 20, fontWeight: 700, margin: 0 }}>🏦 Préstamos</h2>
-        <button onClick={() => { setShowImport(v => !v); setResult(null) }}
-          style={{ padding: '6px 16px', borderRadius: 8, border: '1px solid var(--border,#ccc)', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
+        <BilleteraButton variant="ghost" onClick={() => { setShowImport(v => !v); setResult(null) }}>
           {showImport ? 'Cancelar' : '+ Importar cronograma'}
-        </button>
+        </BilleteraButton>
       </div>
 
       {/* Lista de préstamos */}
       {loadingPrest ? (
-        <p style={{ color: '#888', textAlign: 'center', padding: 32 }}>Cargando…</p>
+        <p style={{ color: 'var(--b-gray)', textAlign: 'center', padding: 32 }}>Cargando…</p>
       ) : prestamos.length === 0 && !showImport ? (
         <div style={{ ...card, textAlign: 'center', padding: 40 }}>
           <div style={{ fontSize: 40, marginBottom: 12 }}>🏦</div>
           <p style={{ fontWeight: 600, marginBottom: 8 }}>No tenés préstamos importados</p>
-          <p style={{ color: '#888', fontSize: 13, marginBottom: 16 }}>Importá el cronograma de cuotas desde tu banco o planilla Excel.</p>
-          <button onClick={() => setShowImport(true)}
-            style={{ padding: '8px 20px', borderRadius: 8, border: 'none', background: '#2563eb', color: '#fff', fontWeight: 700, cursor: 'pointer' }}>
+          <p style={{ color: 'var(--b-gray)', fontSize: 13, marginBottom: 16 }}>Importá el cronograma de cuotas desde tu banco o planilla Excel.</p>
+          <BilleteraButton variant="primary" onClick={() => setShowImport(true)}>
             + Importar cronograma
-          </button>
+          </BilleteraButton>
         </div>
       ) : (
         <div style={{ marginBottom: showImport ? 24 : 0 }}>
@@ -374,23 +370,23 @@ export default function PrestamosTab() {
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
                   <div>
                     <span style={{ fontWeight: 700, fontSize: 16 }}>{p.nombre}</span>
-                    {cancelado && <span style={{ marginLeft: 8, fontSize: 12, color: '#065f46', background: '#d1fae5', padding: '1px 8px', borderRadius: 10 }}>✅ Cancelado</span>}
+                    {cancelado && <BilleteraBadge variant="green" style={{ marginLeft: 8 }}>✅ Cancelado</BilleteraBadge>}
                   </div>
-                  <span style={{ fontSize: 12, color: '#2563eb', fontWeight: 600 }}>{pct}% →</span>
+                  <span style={{ fontSize: 12, color: 'var(--b-teal)', fontWeight: 600 }}>{pct}% →</span>
                 </div>
-                <div style={{ background: '#e5e7eb', borderRadius: 6, height: 8, marginBottom: 10 }}>
-                  <div style={{ background: cancelado ? '#10b981' : '#2563eb', height: '100%', width: `${pct}%`, borderRadius: 6 }} />
+                <div style={{ background: 'var(--b-gray-lt)', borderRadius: 6, height: 8, marginBottom: 10 }}>
+                  <div style={{ background: cancelado ? 'var(--b-green)' : 'var(--b-teal)', height: '100%', width: `${pct}%`, borderRadius: 6 }} />
                 </div>
                 <div style={{ display: 'flex', gap: 20, fontSize: 13 }}>
                   <span>✅ {p.cuotas_pagadas} pagadas</span>
                   <span>⏳ {p.cuotas_pendientes} pendientes</span>
-                  <span style={{ color: '#888' }}>Total: {p.total_cuotas_real} cuotas</span>
+                  <span style={{ color: 'var(--b-gray)' }}>Total: {p.total_cuotas_real} cuotas</span>
                 </div>
                 {p.proxima && (
-                  <div style={{ marginTop: 8, fontSize: 12, color: '#92400e', background: '#fef3c7', padding: '4px 10px', borderRadius: 6, display: 'inline-block' }}>
+                  <BilleteraBadge variant="gold" style={{ marginTop: 8 }}>
                     Próxima: cuota #{p.proxima.numero_cuota} · {p.proxima.mes_previsto}
                     {p.proxima.monto_ordinario ? ` · $${fmt(p.proxima.monto_ordinario)}` : ''}
-                  </div>
+                  </BilleteraBadge>
                 )}
               </div>
             )
@@ -400,7 +396,7 @@ export default function PrestamosTab() {
 
       {/* Formulario de importación */}
       {showImport && (
-        <div style={{ borderTop: prestamos.length > 0 ? '1px solid var(--border,#e0e0e0)' : 'none', paddingTop: prestamos.length > 0 ? 24 : 0 }}>
+        <div style={{ borderTop: prestamos.length > 0 ? '1px solid var(--b-gray-lt)' : 'none', paddingTop: prestamos.length > 0 ? 24 : 0 }}>
           <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 16 }}>Importar cronograma</h3>
 
           {/* Formato */}
@@ -416,7 +412,7 @@ export default function PrestamosTab() {
               <p style={{ marginBottom: 10 }}>Primera fila = encabezados. Columnas detectadas automáticamente por nombre:</p>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
-                  <tr style={{ background: 'var(--border,#e8e8e8)' }}>
+                  <tr style={{ background: 'var(--b-cream)' }}>
                     {['Columna', 'Tipo', '¿Requerida?', 'Descripción'].map(h => <th key={h} style={th}>{h}</th>)}
                   </tr>
                 </thead>
@@ -440,7 +436,7 @@ export default function PrestamosTab() {
                   ))}
                 </tbody>
               </table>
-              <p style={{ marginTop: 10, color: '#888', fontSize: 12 }}>
+              <p style={{ marginTop: 10, color: 'var(--b-gray)', fontSize: 12 }}>
                 💡 El adelanto se calcula automáticamente como <strong>capital × 1,25</strong>. Las cuotas con <code style={codeStyle}>pagado = true</code> quedan como historial.
               </p>
             </div>
@@ -451,30 +447,29 @@ export default function PrestamosTab() {
             <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Nombre del préstamo</label>
             <input type="text" value={nombre} onChange={e => setNombre(e.target.value)}
               placeholder="Ej: Préstamo auto"
-              style={{ width: '100%', padding: '8px 12px', borderRadius: 6, border: '1px solid var(--border,#ccc)', fontSize: 14, boxSizing: 'border-box' }} />
+              style={{ width: '100%', padding: '8px 12px', borderRadius: 6, border: '1px solid var(--b-gray-lt)', fontSize: 14, boxSizing: 'border-box' }} />
           </div>
 
           {/* Drop zone */}
           <div onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) handleFile(f) }}
             onDragOver={e => e.preventDefault()}
             onClick={() => inputRef.current?.click()}
-            style={{ border: '2px dashed var(--border,#ccc)', borderRadius: 10, padding: '32px 24px', textAlign: 'center', cursor: 'pointer', marginBottom: 16 }}>
+            style={{ border: '2px dashed var(--b-gray-lt)', borderRadius: 10, padding: '32px 24px', textAlign: 'center', cursor: 'pointer', marginBottom: 16 }}>
             <div style={{ fontSize: 28, marginBottom: 6 }}>📂</div>
             <p style={{ fontWeight: 600, marginBottom: 4 }}>{fileName || 'Arrastrá el archivo acá o hacé clic'}</p>
-            <p style={{ fontSize: 12, color: '#888' }}>Admite .xlsx · .xls · .csv</p>
+            <p style={{ fontSize: 12, color: 'var(--b-gray)' }}>Admite .xlsx · .xls · .csv</p>
             <input ref={inputRef} type="file" accept=".xlsx,.xls,.csv" style={{ display: 'none' }}
               onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f) }} />
           </div>
 
           {/* Errores */}
           {errors.length > 0 && (
-            <div style={{ background: '#fff3cd', border: '1px solid #ffc107', borderRadius: 8, padding: '10px 14px', marginBottom: 14, fontSize: 12 }}>
-              <strong>⚠️ {errors.length} fila{errors.length > 1 ? 's' : ''} omitidas:</strong>
-              <ul style={{ marginTop: 4, paddingLeft: 18 }}>
+            <BilleteraAlert variant="warning" title={`${errors.length} fila${errors.length > 1 ? 's' : ''} omitidas`} style={{ marginBottom: 14 }}>
+              <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
                 {errors.slice(0, 6).map((e, i) => <li key={i}>Fila {e.row}: {e.mensaje}</li>)}
                 {errors.length > 6 && <li>…y {errors.length - 6} más</li>}
               </ul>
-            </div>
+            </BilleteraAlert>
           )}
 
           {/* Preview */}
@@ -486,23 +481,23 @@ export default function PrestamosTab() {
               <div style={{ overflowX: 'auto' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
-                    <tr style={{ background: 'var(--border,#e8e8e8)' }}>
+                    <tr style={{ background: 'var(--b-cream)' }}>
                       {['#', 'Mes', 'Capital', 'Ordinario', 'Adelanto ×1.25', 'Pagado'].map(h => <th key={h} style={th}>{h}</th>)}
                     </tr>
                   </thead>
                   <tbody>
                     {rows.slice(0, 8).map((r, i) => (
-                      <tr key={i} style={{ background: r.pagado ? 'var(--success-bg,#f0fff4)' : undefined }}>
+                      <tr key={i} style={{ background: r.pagado ? 'var(--b-green-bg)' : undefined }}>
                         <td style={td}>{r.numero_cuota}</td>
                         <td style={td}>{r.mes}</td>
                         <td style={{ ...td, textAlign: 'right' }}>${fmt(r.capital)}</td>
                         <td style={{ ...td, textAlign: 'right' }}>{r.monto_ordinario ? `$${fmt(r.monto_ordinario)}` : '—'}</td>
-                        <td style={{ ...td, textAlign: 'right', color: '#2563eb' }}>${fmt(r.capital * 1.25)}</td>
+                        <td style={{ ...td, textAlign: 'right', color: 'var(--b-teal)' }}>${fmt(r.capital * 1.25)}</td>
                         <td style={{ ...td, textAlign: 'center' }}>{r.pagado ? '✅' : '⏳'}</td>
                       </tr>
                     ))}
                     {rows.length > 8 && (
-                      <tr><td colSpan={6} style={{ ...td, textAlign: 'center', color: '#888' }}>…y {rows.length - 8} filas más</td></tr>
+                      <tr><td colSpan={6} style={{ ...td, textAlign: 'center', color: 'var(--b-gray)' }}>…y {rows.length - 8} filas más</td></tr>
                     )}
                   </tbody>
                 </table>
@@ -512,15 +507,12 @@ export default function PrestamosTab() {
 
           {/* Resultado */}
           {result && (
-            <div style={{ padding: '10px 14px', borderRadius: 8, marginBottom: 14, fontSize: 13, background: result.ok ? '#d1fae5' : '#fee2e2', color: result.ok ? '#065f46' : '#991b1b', border: `1px solid ${result.ok ? '#6ee7b7' : '#fca5a5'}` }}>
-              {result.msg}
-            </div>
+            <BilleteraAlert variant={result.ok ? 'success' : 'danger'} title={result.msg} style={{ marginBottom: 14 }} />
           )}
 
-          <button onClick={handleImport} disabled={importing || !rows.length || !nombre.trim()}
-            style={{ padding: '10px 28px', borderRadius: 8, border: 'none', background: rows.length && nombre.trim() ? '#2563eb' : '#94a3b8', color: '#fff', fontWeight: 700, fontSize: 14, cursor: rows.length && nombre.trim() ? 'pointer' : 'not-allowed', opacity: importing ? 0.7 : 1 }}>
+          <BilleteraButton variant="primary" size="lg" onClick={handleImport} disabled={importing || !rows.length || !nombre.trim()}>
             {importing ? 'Importando…' : `Importar ${rows.length ? rows.length + ' cuotas' : ''}`}
-          </button>
+          </BilleteraButton>
         </div>
       )}
     </div>
