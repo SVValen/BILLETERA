@@ -83,8 +83,8 @@ const TIPO_LABEL: Record<string, string> = {
 
 const RSI_COLOR = (rsi: number | null) => {
   if (rsi === null) return 'var(--fg3)'
-  if (rsi < 35) return '#22c55e'
-  if (rsi > 65) return '#ef4444'
+  if (rsi < 35) return 'var(--b-green)'
+  if (rsi > 65) return 'var(--b-red)'
   return 'var(--fg2)'
 }
 
@@ -200,7 +200,7 @@ export default function InversionesTab() {
       <div className="cards" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
         <div className="card">
           <p className="card-label">Winrate</p>
-          <p className="card-value" style={{ color: stats?.winrate != null && stats.winrate >= 50 ? '#22c55e' : '#ef4444' }}>
+          <p className="card-value" style={{ color: stats?.winrate != null && stats.winrate >= 50 ? 'var(--b-green)' : 'var(--b-red)' }}>
             {stats?.winrate != null ? `${stats.winrate}%` : '—'}
           </p>
           <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--fg3)' }}>
@@ -223,7 +223,7 @@ export default function InversionesTab() {
           <h3 className="widget-title">⏳ Recomendaciones pendientes</h3>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             {recomendaciones.map(rec => {
-              const accionColor = rec.accion === 'comprar' ? '#22c55e' : '#ef4444'
+              const accionColor = rec.accion === 'comprar' ? 'var(--b-green)' : 'var(--b-red)'
               const accionEmoji = rec.accion === 'comprar' ? '🟢' : '🔴'
               const portNombre = rec.portafolios?.nombre_personalizado || rec.portafolios?.nombre_sugerido || TIPO_LABEL[rec.portafolios?.tipo ?? ''] || '—'
               return (
@@ -333,7 +333,7 @@ export default function InversionesTab() {
             {decisiones.slice(0, 20).map(d => {
               const nombre = d.recomendaciones?.activos?.nombre ?? d.recomendaciones?.activos?.codigo ?? '?'
               const accionRec = d.recomendaciones?.accion ?? '?'
-              const resultadoColor = d.resultado === 'exitoso' ? '#22c55e' : d.resultado === 'fallido' ? '#ef4444' : 'var(--fg3)'
+              const resultadoColor = d.resultado === 'exitoso' ? 'var(--b-green)' : d.resultado === 'fallido' ? 'var(--b-red)' : 'var(--fg3)'
               const resultadoLabel: Record<string, string> = { exitoso: '✅ Exitoso', fallido: '❌ Fallido', neutral: '➖ Neutral', pendiente: '⏳ Pendiente' }
               return (
                 <div key={d.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 0', borderBottom: '1px solid var(--border)', fontSize: 14 }}>

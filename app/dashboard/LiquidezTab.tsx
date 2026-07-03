@@ -41,7 +41,7 @@ interface RFData {
   rendimiento_total_usd: number
 }
 
-const COLORS = ['#6366f1', '#f59e0b', '#ef4444', '#06b6d4', '#a855f7', '#ec4899', '#84cc16', '#f97316']
+const COLORS = ['#3CA0A0', '#F0C83C', '#C0392B', '#286450', '#5BBFBF', '#C49A14', '#7FB8B8', '#4F8C6E']
 
 export default function LiquidezTab() {
   const [data, setData] = useState<RFData | null>(null)

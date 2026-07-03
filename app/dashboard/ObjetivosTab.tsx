@@ -132,7 +132,7 @@ export default function ObjetivosTab() {
               <div className="objetivo-progress">
                 <div className="progress-bar">
                   <div className="progress-fill"
-                    style={{ width: `${obj.porcentaje}%`, background: obj.porcentaje >= 100 ? '#22c55e' : '#6366f1' }} />
+                    style={{ width: `${obj.porcentaje}%`, background: obj.porcentaje >= 100 ? 'var(--b-green)' : 'var(--b-teal)' }} />
                 </div>
                 <span className="objetivo-pct">{obj.porcentaje.toFixed(0)}%</span>
               </div>

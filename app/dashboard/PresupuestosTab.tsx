@@ -131,7 +131,7 @@ export default function PresupuestosTab({ mes }: { mes: string }) {
       ) : (
         <div className="presupuestos-list">
           {presupuestos.map(p => {
-            const color = p.porcentaje >= 100 ? '#ef4444' : p.porcentaje >= 80 ? '#f59e0b' : '#22c55e'
+            const color = p.porcentaje >= 100 ? 'var(--b-red)' : p.porcentaje >= 80 ? 'var(--b-gold-dk)' : 'var(--b-green)'
             const isEdit = editando?.id === p.id
             return (
               <div key={p.id} className="pres-item">
@@ -162,7 +162,7 @@ export default function PresupuestosTab({ mes }: { mes: string }) {
                     <div className="pres-meta">
                       <span>Gastado: {fmt(p.gastado)}</span>
                       <span>Presupuesto: {fmt(p.presupuestado)}</span>
-                      <span style={{ color: p.disponible < 0 ? '#ef4444' : '#22c55e' }}>
+                      <span style={{ color: p.disponible < 0 ? 'var(--b-red)' : 'var(--b-green)' }}>
                         {p.disponible >= 0 ? `Disponible: ${fmt(p.disponible)}` : `Exceso: ${fmt(-p.disponible)}`}
                       </span>
                     </div>

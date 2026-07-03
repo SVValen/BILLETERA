@@ -123,13 +123,13 @@ export default function DetalleMensualTab({ mes }: { mes: string }) {
               {totalPendiente > 0 && (
                 <div style={{ textAlign: 'right' }}>
                   <div style={{ fontSize: 11, color: 'var(--fg3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.5px' }}>⏳ Por pagar</div>
-                  <div style={{ fontSize: 20, fontWeight: 800, color: '#f59e0b', letterSpacing: '-0.3px' }}>{fmt(totalPendiente)}</div>
+                  <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--b-gold-dk)', letterSpacing: '-0.3px' }}>{fmt(totalPendiente)}</div>
                 </div>
               )}
               {totalPagado > 0 && (
                 <div style={{ textAlign: 'right' }}>
                   <div style={{ fontSize: 11, color: 'var(--fg3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.5px' }}>✅ Pagado</div>
-                  <div style={{ fontSize: 20, fontWeight: 800, color: '#22c55e', letterSpacing: '-0.3px' }}>{fmt(totalPagado)}</div>
+                  <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--b-green)', letterSpacing: '-0.3px' }}>{fmt(totalPagado)}</div>
                 </div>
               )}
             </div>

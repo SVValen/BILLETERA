@@ -1,42 +1,30 @@
 @import './components/design/tokens.css';
 
-/* ── Variables (light / dark) ────────────────────────────────────────────── */
+/* ── Variables (light / dark) ────────────────────────────────────────────
+   Alias sobre los tokens Billetera (--b-*) definidos en tokens.css.
+   Se re-derivan solos en dark mode porque los --b-* ya cambian bajo
+   html.dark — no hace falta un bloque html.dark separado acá.        ── */
 :root {
-  --bg:       #f0f2f7;
-  --bg2:      #ffffff;
-  --bg3:      #f6f7fb;
-  --fg:       #0f1117;
-  --fg2:      #4b5563;
-  --fg3:      #9ca3af;
-  --border:   #e5e7eb;
-  --border2:  #d1d5db;
-  --shadow:   rgba(0,0,0,.06);
-  --shadow2:  rgba(0,0,0,.12);
-  --primary:  #6366f1;
-  --primary2: #4f46e5;
-  --accent:   #8b5cf6;
-}
-html.dark {
-  --bg:       #0d1117;
-  --bg2:      #161b22;
-  --bg3:      #1c2333;
-  --fg:       #e6edf3;
-  --fg2:      #8b949e;
-  --fg3:      #6e7681;
-  --border:   #21262d;
-  --border2:  #30363d;
-  --shadow:   rgba(0,0,0,.4);
-  --shadow2:  rgba(0,0,0,.6);
-  --primary:  #818cf8;
-  --primary2: #6366f1;
-  --accent:   #a78bfa;
+  --bg:       var(--b-cream);
+  --bg2:      var(--b-white);
+  --bg3:      var(--b-cream-dk);
+  --fg:       var(--b-navy);
+  --fg2:      var(--b-gray);
+  --fg3:      var(--b-gray);
+  --border:   var(--b-gray-lt);
+  --border2:  var(--b-gray-lt);
+  --shadow:   rgba(13,43,62,.08);
+  --shadow2:  rgba(13,43,62,.16);
+  --primary:  var(--b-teal);
+  --primary2: var(--b-teal-lt);
+  --accent:   var(--b-gold);
 }
 
 *, *::before, *::after { box-sizing: border-box; }
 
 body {
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', system-ui, sans-serif;
+  font-family: var(--font-body);
   background: var(--bg);
   color: var(--fg);
   transition: background .2s, color .2s;
@@ -61,6 +49,7 @@ body {
   z-index: 10;
 }
 .nav-title {
+  font-family: var(--font-display);
   font-weight: 800;
   font-size: 17px;
   letter-spacing: -0.3px;
@@ -151,7 +140,7 @@ body {
 }
 .card:hover::after { opacity: 0.7; }
 .card-label { margin: 0; font-size: 11px; color: var(--fg3); text-transform: uppercase; letter-spacing: .8px; font-weight: 600; }
-.card-value { margin: 8px 0 0; font-size: 22px; font-weight: 800; letter-spacing: -0.5px; }
+.card-value { margin: 8px 0 0; font-family: var(--font-display); font-size: 22px; font-weight: 800; letter-spacing: -0.5px; }
 
 /* ── Charts ── */
 .charts {
@@ -178,7 +167,7 @@ body {
   border: 1px solid var(--border);
   margin-bottom: 24px;
 }
-.widget-title { margin: 0 0 18px; font-size: 16px; font-weight: 700; letter-spacing: -0.2px; }
+.widget-title { margin: 0 0 18px; font-family: var(--font-display); font-size: 16px; font-weight: 700; letter-spacing: -0.2px; }
 
 .cuotas-list { display: flex; flex-direction: column; gap: 12px; }
 .cuota-item {
@@ -234,16 +223,11 @@ body {
   white-space: nowrap;
   letter-spacing: 0.1px;
 }
-.badge-ok  { background: #dcfce7; color: #15803d; }
-.badge-pending { background: #fef3c7; color: #b45309; }
-.badge-alert   { background: #fee2e2; color: #b91c1c; }
-.badge-info    { background: #e0e7ff; color: #4338ca; }
-.badge-last    { background: #f3e8ff; color: #7c3aed; }
-html.dark .badge-ok      { background: rgba(20,83,45,.5);   color: #4ade80; }
-html.dark .badge-pending  { background: rgba(69,26,3,.5);    color: #fbbf24; }
-html.dark .badge-alert    { background: rgba(69,10,10,.5);   color: #f87171; }
-html.dark .badge-info     { background: rgba(30,27,75,.5);   color: #818cf8; }
-html.dark .badge-last     { background: rgba(46,16,101,.5);  color: #c084fc; }
+.badge-ok      { background: var(--b-green-bg); color: var(--b-green); }
+.badge-pending { background: var(--b-gold-bg);  color: var(--b-gold-dk); }
+.badge-alert   { background: var(--b-red-bg);   color: var(--b-red); }
+.badge-info    { background: var(--b-teal-bg);  color: var(--b-teal); }
+.badge-last    { background: var(--b-gold-bg);  color: var(--b-gold-dk); }
 
 /* ── Tab content ── */
 .tab-content { /* intentionally empty */ }
@@ -256,7 +240,7 @@ html.dark .badge-last     { background: rgba(46,16,101,.5);  color: #c084fc; }
   gap: 12px;
   flex-wrap: wrap;
 }
-.section-title { margin: 0; font-size: 20px; font-weight: 800; letter-spacing: -0.4px; }
+.section-title { margin: 0; font-family: var(--font-display); font-size: 20px; font-weight: 800; letter-spacing: -0.4px; }
 
 /* ── Totales filtrados ── */
 .total-filtrado {
@@ -343,7 +327,7 @@ html.dark .badge-last     { background: rgba(46,16,101,.5);  color: #c084fc; }
   transition: border-color .15s, box-shadow .15s;
   font-weight: 500;
 }
-.form-input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(99,102,241,.12); }
+.form-input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(60,160,160,.15); }
 .form-select {
   border: 1.5px solid var(--border2);
   border-radius: 10px;
@@ -377,7 +361,7 @@ html.dark .badge-last     { background: rgba(46,16,101,.5);  color: #c084fc; }
 }
 .btn-primary:hover:not(:disabled) {
   background: var(--primary2);
-  box-shadow: 0 4px 12px rgba(99,102,241,.35);
+  box-shadow: 0 4px 12px rgba(60,160,160,.35);
   transform: translateY(-1px);
 }
 .btn-primary:active:not(:disabled) { transform: translateY(0); }
@@ -434,7 +418,7 @@ html.dark .badge-last     { background: rgba(46,16,101,.5);  color: #c084fc; }
   background: var(--primary);
   color: #fff;
   border-color: var(--primary);
-  box-shadow: 0 2px 8px rgba(99,102,241,.3);
+  box-shadow: 0 2px 8px rgba(60,160,160,.3);
 }
 
 /* ── Paginación ── */
@@ -476,10 +460,10 @@ td.date { color: var(--fg3); white-space: nowrap; font-size: 13px; }
 .empty { color: var(--fg3); text-align: center; padding: 56px 16px; line-height: 1.8; font-size: 15px; }
 .empty span { font-size: 13px; }
 .muted { color: var(--fg3); }
-.error-banner { background: #fee2e2; color: #b91c1c; border-radius: 10px; padding: 14px 18px; margin-bottom: 20px; font-size: 14px; font-weight: 500; }
+.error-banner { background: var(--b-red-bg); color: var(--b-red); border-radius: 10px; padding: 14px 18px; margin-bottom: 20px; font-size: 14px; font-weight: 500; }
 .loading { color: var(--fg3); text-align: center; margin-top: 60px; font-size: 15px; }
-.gasto  { color: #ef4444; font-weight: 700; }
-.ingreso { color: #22c55e; font-weight: 700; }
+.gasto   { color: var(--b-red); font-weight: 700; }
+.ingreso { color: var(--b-green); font-weight: 700; }
 
 /* ════════════════════════════════
    RESPONSIVE
@@ -506,16 +490,16 @@ td.date { color: var(--fg3); white-space: nowrap; font-size: 13px; }
 /* ── Auth pages ── */
 .auth-page { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 16px; }
 .auth-card { background: var(--bg2); border-radius: 20px; padding: 44px 40px; box-shadow: 0 4px 32px var(--shadow2); width: 100%; max-width: 420px; border: 1px solid var(--border); }
-.auth-title { margin: 0 0 8px; font-size: 26px; font-weight: 800; letter-spacing: -0.5px; }
+.auth-title { margin: 0 0 8px; font-family: var(--font-display); font-size: 26px; font-weight: 800; letter-spacing: -0.5px; }
 .auth-sub { margin: 0 0 28px; color: var(--fg2); font-size: 14px; line-height: 1.7; }
 .auth-sub code { background: var(--bg3); padding: 2px 6px; border-radius: 6px; font-size: 13px; }
 .auth-form { display: flex; flex-direction: column; gap: 12px; }
 .auth-input { border: 1.5px solid var(--border2); border-radius: 12px; padding: 13px 16px; font-size: 15px; outline: none; transition: border-color .15s, box-shadow .15s; width: 100%; background: var(--bg); color: var(--fg); }
-.auth-input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(99,102,241,.15); }
+.auth-input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(60,160,160,.15); }
 .auth-btn { background: var(--primary); color: #fff; border: none; border-radius: 12px; padding: 13px; font-size: 15px; font-weight: 700; cursor: pointer; transition: background .15s, box-shadow .15s; }
-.auth-btn:hover:not(:disabled) { background: var(--primary2); box-shadow: 0 4px 16px rgba(99,102,241,.4); }
+.auth-btn:hover:not(:disabled) { background: var(--primary2); box-shadow: 0 4px 16px rgba(60,160,160,.4); }
 .auth-btn:disabled { opacity: .6; cursor: not-allowed; }
-.auth-error { margin: 4px 0 0; color: #ef4444; font-size: 13px; font-weight: 500; }
+.auth-error { margin: 4px 0 0; color: var(--b-red); font-size: 13px; font-weight: 500; }
 .auth-success { text-align: center; }
 .auth-success p:first-child { font-size: 40px; margin: 0 0 10px; }
 .auth-btn-secondary { background: var(--bg3); color: var(--fg); border: 1.5px solid var(--border2); border-radius: 12px; padding: 12px; font-size: 15px; font-weight: 600; cursor: pointer; transition: background .15s; }

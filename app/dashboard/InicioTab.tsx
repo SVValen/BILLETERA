@@ -9,9 +9,9 @@ import {
 } from 'recharts'
 
 const COLORS = [
-  '#6366f1', '#f59e0b', '#ef4444', '#06b6d4', '#a855f7',
-  '#ec4899', '#84cc16', '#f97316', '#14b8a6', '#8b5cf6',
-  '#0ea5e9', '#d946ef', '#10b981', '#fb923c',
+  '#3CA0A0', '#F0C83C', '#C0392B', '#286450', '#5BBFBF',
+  '#C49A14', '#0D2B3E', '#8C8C8C', '#7FB8B8', '#B8860B',
+  '#4F8C6E', '#D4735F', '#1F4859', '#E8A93C',
 ]
 
 function fmt(n: number) {
@@ -177,9 +177,9 @@ export default function InicioTab({ mes }: { mes: string }) {
               <XAxis dataKey="name" tick={{ fontSize: 12 }} />
               <YAxis tickFormatter={fmtK} tick={{ fontSize: 11 }} width={52} />
               <Tooltip formatter={(v) => fmt(v as number)} />
-              <Bar dataKey="Consumo" fill="#f59e0b" radius={[6, 6, 0, 0]} label={{ position: 'top', formatter: (v: any) => fmtK(v), fontSize: 11, fill: 'var(--fg2)' }} />
-              <Bar dataKey="Pagado" fill="#ef4444" radius={[6, 6, 0, 0]} label={{ position: 'top', formatter: (v: any) => fmtK(v), fontSize: 11, fill: 'var(--fg2)' }} />
-              <Bar dataKey="Ingresos" fill="#22c55e" radius={[6, 6, 0, 0]} label={{ position: 'top', formatter: (v: any) => fmtK(v), fontSize: 11, fill: 'var(--fg2)' }} />
+              <Bar dataKey="Consumo" fill="var(--b-gold)" radius={[6, 6, 0, 0]} label={{ position: 'top', formatter: (v: any) => fmtK(v), fontSize: 11, fill: 'var(--fg2)' }} />
+              <Bar dataKey="Pagado" fill="var(--b-red)" radius={[6, 6, 0, 0]} label={{ position: 'top', formatter: (v: any) => fmtK(v), fontSize: 11, fill: 'var(--fg2)' }} />
+              <Bar dataKey="Ingresos" fill="var(--b-green)" radius={[6, 6, 0, 0]} label={{ position: 'top', formatter: (v: any) => fmtK(v), fontSize: 11, fill: 'var(--fg2)' }} />
             </BarChart>
           </ResponsiveContainer>
         </div>
