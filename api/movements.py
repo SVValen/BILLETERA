@@ -43,10 +43,10 @@ async def get_movements(request: Request):
     # Main query (paginated, with count)
     query = (
         supabase.table("movimientos")
-        .select("id, fecha, descripcion, monto, tipo, origen, categoria_id, categorias(nombre, emoji), tarjeta_id, es_pago_tarjeta, tarjetas(nombre)", count="exact")
+        .select("id, fecha, descripcion, monto, tipo, origen, categoria_id, categorias(nombre, emoji), tarjeta_id, es_pago_tarjeta, tarjetas(nombre), created_at", count="exact")
         .eq("usuario_id", telegram_id)
         .neq("estado", "anulado")
-        .order("fecha", desc=True)
+        .order("created_at", desc=True)
         .order("id", desc=True)
     )
     # Totals query (lightweight, same filters, no pagination)

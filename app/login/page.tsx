@@ -56,7 +56,7 @@ export default function LoginPage() {
   return (
     <div className="auth-page">
       <div className="auth-card">
-        <h1 className="auth-title">Billetera 💰</h1>
+        <h1 className="auth-title">BilleTero 💰</h1>
         <p className="auth-sub">
           Ingresá con tu ID de Telegram y contraseña.<br />
           Si es tu primera vez, se crea la cuenta automáticamente.

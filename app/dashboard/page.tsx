@@ -80,7 +80,7 @@ export default function Dashboard() {
     <>
       {/* Nav */}
       <div className="nav">
-        <span className="nav-title">Billetera 💰</span>
+        <span className="nav-title">BilleTero 💰</span>
         <div className="nav-user">
           <button className="btn-icon" onClick={toggleDark} title={dark ? 'Modo claro' : 'Modo oscuro'}>
             {dark ? '☀️' : '🌙'}
