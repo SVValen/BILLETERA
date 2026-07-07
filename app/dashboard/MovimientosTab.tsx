@@ -19,6 +19,7 @@ interface Movement {
   categorias: { nombre: string; emoji: string } | null
   tarjeta_id: number | null
   tarjetas: { nombre: string } | null
+  es_pago_tarjeta: boolean
   forma_pago: string
 }
 
@@ -26,6 +27,12 @@ interface Categoria {
   id: number
   emoji: string
   nombre: string
+}
+
+interface Tarjeta {
+  id: number
+  nombre: string
+  dia_cierre: number | null
 }
 
 export default function MovimientosTab({ mes }: { mes: string }) {
@@ -42,7 +49,9 @@ export default function MovimientosTab({ mes }: { mes: string }) {
   const [fechaDesde, setFechaDesde] = useState('')
   const [fechaHasta, setFechaHasta] = useState('')
   const [categorias, setCategorias] = useState<Categoria[]>([])
+  const [tarjetas, setTarjetas] = useState<Tarjeta[]>([])
   const [recategorizando, setRecategorizando] = useState<number | null>(null)
+  const [editandoPago, setEditandoPago] = useState<number | null>(null)
   const [totalMontoGasto, setTotalMontoGasto] = useState<number | null>(null)
   const [totalMontoIngreso, setTotalMontoIngreso] = useState<number | null>(null)
 
@@ -50,6 +59,10 @@ export default function MovimientosTab({ mes }: { mes: string }) {
     fetchWithAuth('/api/presupuestos?resource=categorias')
       .then(r => r.json())
       .then(data => setCategorias(Array.isArray(data) ? data : []))
+      .catch(() => {})
+    fetchWithAuth('/api/movements?resource=tarjetas')
+      .then(r => r.json())
+      .then(data => setTarjetas(Array.isArray(data) ? data : []))
       .catch(() => {})
   }, [])
 
@@ -96,6 +109,16 @@ export default function MovimientosTab({ mes }: { mes: string }) {
       body: JSON.stringify({ categoria_id: categoriaId }),
     })
     setRecategorizando(null)
+    await fetch_()
+  }
+
+  async function cambiarPago(movId: number, tarjetaId: string) {
+    await fetchWithAuth(`/api/movements?id=${movId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tarjeta_id: tarjetaId ? Number(tarjetaId) : null }),
+    })
+    setEditandoPago(null)
     await fetch_()
   }
 
@@ -227,7 +250,28 @@ export default function MovimientosTab({ mes }: { mes: string }) {
                           </span>
                         )}
                       </td>
-                      <td>{m.tarjetas ? `💳 ${m.tarjetas.nombre}` : '💵 Efectivo'}</td>
+                      <td>
+                        {m.tipo !== 'gasto' || m.es_pago_tarjeta ? (
+                          m.tarjetas ? `💳 ${m.tarjetas.nombre}` : '💵 Efectivo'
+                        ) : editandoPago === m.id ? (
+                          <select
+                            className="cat-select"
+                            autoFocus
+                            defaultValue={m.tarjeta_id ? String(m.tarjeta_id) : ''}
+                            onChange={e => cambiarPago(m.id, e.target.value)}
+                            onBlur={() => setEditandoPago(null)}
+                          >
+                            <option value="">💵 Efectivo</option>
+                            {tarjetas.map(t => (
+                              <option key={t.id} value={String(t.id)}>💳 {t.nombre}</option>
+                            ))}
+                          </select>
+                        ) : (
+                          <span style={{ cursor: 'pointer' }} onClick={() => setEditandoPago(m.id)} title="Cambiar forma de pago">
+                            {m.tarjetas ? `💳 ${m.tarjetas.nombre}` : '💵 Efectivo'} ✏️
+                          </span>
+                        )}
+                      </td>
                       <td className="muted">{m.forma_pago}</td>
                       <td className="muted">{m.origen}</td>
                       <td className={`right ${m.tipo}`}>

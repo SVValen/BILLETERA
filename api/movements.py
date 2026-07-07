@@ -1,6 +1,7 @@
 import sys
 import os
 import re
+from datetime import date
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -9,6 +10,7 @@ from fastapi.responses import JSONResponse
 from lib.supabase_client import get_supabase
 from lib.auth import get_telegram_id_from_request
 from lib.date_utils import mes_rango, validate_mes
+from lib.tarjetas import calcular_mes_resumen
 from api.bot.helpers import _save_learned_keywords
 
 app = FastAPI()
@@ -23,6 +25,19 @@ async def get_movements(request: Request):
     telegram_id, err = await get_telegram_id_from_request(request)
     if err:
         return err
+
+    resource = request.query_params.get("resource", "").strip()
+    if resource == "tarjetas":
+        supabase = get_supabase()
+        r = (
+            supabase.table("tarjetas")
+            .select("id, nombre, dia_cierre")
+            .eq("usuario_id", telegram_id)
+            .eq("activa", True)
+            .order("nombre")
+            .execute()
+        )
+        return JSONResponse(r.data or [])
 
     mes = request.query_params.get("mes", "")
     q = request.query_params.get("q", "").strip()
@@ -155,11 +170,58 @@ async def patch_movement(request: Request):
         return JSONResponse({"error": "Falta id"}, status_code=400)
 
     body = await request.json()
+    supabase = get_supabase()
+
+    if "tarjeta_id" in body:
+        mov_r = (
+            supabase.table("movimientos")
+            .select("tipo, es_pago_tarjeta, fecha, fecha_compra")
+            .eq("id", int(id_))
+            .eq("usuario_id", telegram_id)
+            .single()
+            .execute()
+        )
+        if not mov_r.data:
+            return JSONResponse({"error": "Movimiento no encontrado"}, status_code=404)
+        mov = mov_r.data
+        if mov.get("tipo") != "gasto" or mov.get("es_pago_tarjeta"):
+            return JSONResponse({"error": "No se puede cambiar la forma de pago de este movimiento"}, status_code=400)
+
+        tarjeta_id = body.get("tarjeta_id")
+        if tarjeta_id is None:
+            updates = {"tarjeta_id": None, "mes_resumen": None}
+        else:
+            tid = int(tarjeta_id)
+            tar_r = (
+                supabase.table("tarjetas")
+                .select("dia_cierre")
+                .eq("id", tid)
+                .eq("usuario_id", telegram_id)
+                .single()
+                .execute()
+            )
+            if not tar_r.data:
+                return JSONResponse({"error": "Tarjeta no encontrada"}, status_code=404)
+            dia_cierre = tar_r.data.get("dia_cierre")
+            fecha_ref = mov.get("fecha_compra") or mov.get("fecha")
+            mes_resumen = calcular_mes_resumen(date.fromisoformat(fecha_ref), dia_cierre) if dia_cierre else None
+            updates = {"tarjeta_id": tid, "mes_resumen": mes_resumen}
+
+        r = (
+            supabase.table("movimientos")
+            .update(updates)
+            .eq("id", int(id_))
+            .eq("usuario_id", telegram_id)
+            .execute()
+        )
+        if not r.data:
+            return JSONResponse({"error": "Movimiento no encontrado"}, status_code=404)
+        return JSONResponse({"ok": True, "data": r.data[0]})
+
     categoria_id = body.get("categoria_id")
     if categoria_id is None:
         return JSONResponse({"error": "Falta categoria_id"}, status_code=400)
 
-    supabase = get_supabase()
     r = (
         supabase.table("movimientos")
         .update({"categoria_id": int(categoria_id)})
