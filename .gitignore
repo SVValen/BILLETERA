@@ -19,3 +19,6 @@ __pycache__/
 Thumbs.db
 
 .vercel
+
+# Claude Code (config local de sesión)
+.claude/settings.json
