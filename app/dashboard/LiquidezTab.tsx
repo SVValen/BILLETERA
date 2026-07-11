@@ -5,53 +5,67 @@ import { fetchWithAuth } from '@/lib/fetch-with-auth'
 import { BilleteraAlert, BilleteraBadge } from '@/app/components/design'
 import { PieChart, Pie, Cell, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 
+interface Rendimiento {
+  dias_transcurridos: number
+  rendimiento_ars_pct: number
+  monto_ars_final_estimado: number
+  usd_actual_estimado: number
+  rendimiento_usd: number
+  rendimiento_usd_pct: number
+}
+
 interface Posicion {
   id: number
   instrumento_id: number
   tipo: string
   monto_ars: number
-  monto_usd: number
+  monto_usd: number | null
   monto_usd_entrada: number
   precio_entrada: number | null
   cantidad: number | null
   tna_contratada: number
   fecha_entrada: string
   fecha_vencimiento: string | null
-  rendimiento_acumulado: number | null
   broker: string | null
   estado: string
+  rendimiento: Rendimiento
   instrumentos_rf: {
     nombre: string
     tipo: string
     tna_actual: number
+    codigo: string
     precio_actual: number | null
   }
 }
 
-interface RFData {
+interface CarryTrade {
+  accion: string
+  carry_mensual: number
+  tna_mensual: number
+  devaluacion_mensual: number
+  razon: string
+}
+
+interface LiquidezData {
   posiciones: Posicion[]
-  dolar_mep: number
-  carry_trade: {
-    accion: string
-    tna_mensual: number
-    carry_mensual: number
-  }
-  total_usd: number
-  total_ars: number
-  rendimiento_total_usd: number
+  carry: CarryTrade | null
+  allocation: { total_usd_rf: number; total_usd_libre: number; pct_rf: number; pct_libre: number }
+  dolar_mep: number | null
+  capital_usd: number | null
+  asignacion_rf_pct: number | null
 }
 
 const COLORS = ['#3CA0A0', '#F0C83C', '#C0392B', '#286450', '#5BBFBF', '#C49A14', '#7FB8B8', '#4F8C6E']
 
 export default function LiquidezTab() {
-  const [data, setData] = useState<RFData | null>(null)
+  const [data, setData] = useState<LiquidezData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     async function fetchData() {
       try {
-        const res = await fetchWithAuth('/api/dashboard/rf')
+        const res = await fetchWithAuth('/api/inversiones?resource=liquidez')
         if (!res.ok) throw new Error('Error al cargar datos de RF')
         const result = await res.json()
         setData(result)
@@ -68,26 +82,29 @@ export default function LiquidezTab() {
   if (error) return <BilleteraAlert variant="danger" title="Error">{error}</BilleteraAlert>
   if (!data) return <p className="empty">Sin datos</p>
 
-  const { posiciones, dolar_mep, carry_trade, total_usd, total_ars, rendimiento_total_usd } = data
+  const { posiciones, carry, dolar_mep } = data
 
-  const carryVariant = carry_trade.accion === 'entrar' ? 'green' : carry_trade.accion === 'salir' ? 'red' : 'gold'
-  const carryIcon = carry_trade.accion === 'entrar' ? '🟢' : carry_trade.accion === 'salir' ? '🔴' : '🟡'
+  const total_ars = posiciones.reduce((s, p) => s + (p.monto_ars || 0), 0)
+  const total_usd = dolar_mep ? total_ars / dolar_mep : 0
+  const rendimiento_total_usd = posiciones.reduce((s, p) => s + (p.rendimiento?.rendimiento_usd || 0), 0)
+
+  const carryVariant = carry ? (carry.accion === 'entrar' ? 'green' : carry.accion === 'salir' ? 'red' : 'gold') : 'gray'
+  const carryIcon = carry ? (carry.accion === 'entrar' ? '🟢' : carry.accion === 'salir' ? '🔴' : '🟡') : '⚪'
 
   // Datos para gráfico de composición
   const composicionData = posiciones.map((pos) => ({
     name: pos.instrumentos_rf?.nombre || 'instrumento',
     value: pos.monto_ars,
-    usd: pos.monto_usd || pos.monto_ars / dolar_mep,
   }))
 
   // Datos para gráfico de rendimiento histórico (generado a partir de posiciones)
-  const historicoData = posiciones
+  const historicoData = [...posiciones]
     .sort((a, b) => new Date(a.fecha_entrada).getTime() - new Date(b.fecha_entrada).getTime())
     .map((pos) => {
       const fecha = new Date(pos.fecha_entrada)
       return {
         fecha: fecha.toLocaleDateString('es-AR', { month: 'short', day: 'numeric' }),
-        rendimiento_usd: (pos.rendimiento_acumulado || 0),
+        rendimiento_usd: pos.rendimiento?.rendimiento_usd || 0,
       }
     })
 
@@ -100,24 +117,28 @@ export default function LiquidezTab() {
       {/* Carry Trade */}
       <div className="widget-box">
         <h3 className="widget-title">{carryIcon} Carry Trade</h3>
-        <div className="objetivo-stats">
-          <div className="obj-stat">
-            <span className="obj-stat-label">Acción</span>
-            <BilleteraBadge variant={carryVariant}>{carry_trade.accion.toUpperCase()}</BilleteraBadge>
+        {carry ? (
+          <div className="objetivo-stats">
+            <div className="obj-stat">
+              <span className="obj-stat-label">Acción</span>
+              <BilleteraBadge variant={carryVariant}>{carry.accion.toUpperCase()}</BilleteraBadge>
+            </div>
+            <div className="obj-stat">
+              <span className="obj-stat-label">Carry mensual</span>
+              <span className="obj-stat-value">{carry.carry_mensual > 0 ? '+' : ''}{carry.carry_mensual.toFixed(2)}%</span>
+            </div>
+            <div className="obj-stat">
+              <span className="obj-stat-label">TNA caución</span>
+              <span className="obj-stat-value">{carry.tna_mensual.toFixed(1)}%/mes</span>
+            </div>
+            <div className="obj-stat">
+              <span className="obj-stat-label">Dólar MEP</span>
+              <span className="obj-stat-value">{dolar_mep ? `$${dolar_mep.toLocaleString('es-AR', { maximumFractionDigits: 2 })}` : '—'}</span>
+            </div>
           </div>
-          <div className="obj-stat">
-            <span className="obj-stat-label">Carry mensual</span>
-            <span className="obj-stat-value">{carry_trade.carry_mensual > 0 ? '+' : ''}{carry_trade.carry_mensual.toFixed(2)}%</span>
-          </div>
-          <div className="obj-stat">
-            <span className="obj-stat-label">TNA caución</span>
-            <span className="obj-stat-value">{carry_trade.tna_mensual.toFixed(1)}%/mes</span>
-          </div>
-          <div className="obj-stat">
-            <span className="obj-stat-label">Dólar MEP</span>
-            <span className="obj-stat-value">${dolar_mep.toLocaleString('es-AR', { maximumFractionDigits: 2 })}</span>
-          </div>
-        </div>
+        ) : (
+          <p className="muted" style={{ fontSize: 13, margin: 0 }}>Sin datos suficientes para calcular el carry trade.</p>
+        )}
       </div>
 
       {/* Resumen */}
@@ -130,7 +151,9 @@ export default function LiquidezTab() {
         <div className="card">
           <p className="card-label">Rendimiento acumulado</p>
           <p className="card-value ingreso">${rendimiento_total_usd > 0 ? '+' : ''}{rendimiento_total_usd.toLocaleString('es-AR', { maximumFractionDigits: 2 })}</p>
-          <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>{rendimiento_total_usd > 0 ? '+' : ''}{(rendimiento_total_usd / total_usd * 100).toFixed(2)}%</p>
+          <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+            {total_usd > 0 ? `${rendimiento_total_usd > 0 ? '+' : ''}${(rendimiento_total_usd / total_usd * 100).toFixed(2)}%` : '—'}
+          </p>
         </div>
         <div className="card">
           <p className="card-label">Posiciones abiertas</p>
@@ -215,6 +238,7 @@ export default function LiquidezTab() {
                   const variacion = ((precio_actual - precio_entrada) / precio_entrada * 100)
                   const venc = pos.fecha_vencimiento ? new Date(pos.fecha_vencimiento).toLocaleDateString('es-AR', { month: 'short', day: 'numeric' }) : '—'
                   const broker_txt = pos.broker ? ` (${pos.broker})` : ''
+                  const rendimiento_usd = pos.rendimiento?.rendimiento_usd ?? 0
 
                   return (
                     <tr key={pos.id}>
@@ -230,7 +254,7 @@ export default function LiquidezTab() {
                       </td>
                       <td className="right muted">{venc}</td>
                       <td className="right ingreso">
-                        ${(pos.rendimiento_acumulado ?? 0) > 0 ? '+' : ''}{(pos.rendimiento_acumulado ?? 0).toLocaleString('es-AR', { maximumFractionDigits: 2 })}
+                        ${rendimiento_usd > 0 ? '+' : ''}{rendimiento_usd.toLocaleString('es-AR', { maximumFractionDigits: 2 })}
                       </td>
                     </tr>
                   )
@@ -248,7 +272,7 @@ export default function LiquidezTab() {
 
       {/* Tips */}
       <BilleteraAlert variant="info" title="💡 Tips">
-        Carry trade {carryIcon} indica si {carry_trade.accion === 'entrar' ? 'conviene estar en ARS' : 'conviene USD'}.
+        {carry && `Carry trade ${carryIcon} indica si ${carry.accion === 'entrar' ? 'conviene estar en ARS' : 'conviene USD'}. `}
         Rendimiento se actualiza cada vez que se recalculan precios.
         Usá <code>/liquidez</code> en el bot para actualizar precios.
       </BilleteraAlert>
