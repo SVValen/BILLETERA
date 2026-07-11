@@ -17,7 +17,7 @@ contadores/tipos/usuario_id.
 import email
 import imaplib
 import logging
-from datetime import date
+from datetime import date, timedelta
 from email.header import decode_header
 
 from lib.supabase_client import get_supabase
@@ -37,6 +37,13 @@ logger = logging.getLogger("gmail_sync")
 
 IMAP_HOST = "imap.gmail.com"
 SANTANDER_SENDER = "mensajesyavisos@mails.santander.com.ar"
+_DIAS_VENTANA_BUSQUEDA = 5  # ventana de reintento: cubre mails leídos manualmente sin depender de \Seen
+_MESES_IMAP = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+
+def _imap_since_date(d: date) -> str:
+    """Formatea una fecha para el criterio SINCE de IMAP ('DD-Mon-YYYY', en inglés, locale-independiente)."""
+    return f"{d.day:02d}-{_MESES_IMAP[d.month - 1]}-{d.year}"
 
 
 def _decode_header_value(raw: str | None) -> str:
@@ -241,7 +248,10 @@ async def sync_gmail_for_user(usuario_id: str, gmail_email: str, gmail_app_passw
 
     try:
         imap.select("INBOX")
-        status, data = imap.search(None, "UNSEEN", f'FROM "{SANTANDER_SENDER}"')
+        desde = _imap_since_date(date.today() - timedelta(days=_DIAS_VENTANA_BUSQUEDA))
+        # No filtramos por UNSEEN: un mail leído manualmente (preview de Gmail, celular, etc.)
+        # no debe perderse — el dedup real es por Message-ID en email_procesados.
+        status, data = imap.search(None, "SINCE", desde, f'FROM "{SANTANDER_SENDER}"')
         if status != "OK":
             return stats
 
