@@ -17,7 +17,7 @@ contadores/tipos/usuario_id.
 import email
 import imaplib
 import logging
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from email.header import decode_header
 
 from lib.supabase_client import get_supabase
@@ -233,6 +233,52 @@ async def _procesar_parsed(usuario_id: str, tipo: str, parsed: dict, token: str)
     return True, movement_id, None
 
 
+_HORAS_ENTRE_AVISOS_LOGIN = 12
+
+
+async def _avisar_fallo_login(usuario_id: str, token: str) -> None:
+    """
+    Avisa por Telegram que el login IMAP falló (ej. app password de Gmail
+    vencida/revocada) — antes esto quedaba silencioso. Debounced a 1 aviso
+    cada _HORAS_ENTRE_AVISOS_LOGIN para no spamear en cada corrida del cron.
+    """
+    if not token:
+        return
+    supabase = get_supabase()
+    cfg_r = (
+        supabase.table("usuario_gmail_config")
+        .select("ultimo_aviso_error_at")
+        .eq("usuario_id", usuario_id)
+        .single()
+        .execute()
+    )
+    if not cfg_r.data:
+        return
+    ultimo = cfg_r.data.get("ultimo_aviso_error_at")
+    if ultimo:
+        try:
+            ultimo_dt = datetime.fromisoformat(ultimo.replace("Z", "+00:00"))
+            if ultimo_dt.tzinfo is None:
+                ultimo_dt = ultimo_dt.replace(tzinfo=timezone.utc)
+            if (datetime.now(timezone.utc) - ultimo_dt) < timedelta(hours=_HORAS_ENTRE_AVISOS_LOGIN):
+                return
+        except ValueError:
+            pass
+
+    supabase.table("usuario_gmail_config").update(
+        {"ultimo_aviso_error_at": datetime.now(timezone.utc).isoformat()}
+    ).eq("usuario_id", usuario_id).execute()
+
+    await _send(
+        int(usuario_id),
+        "⚠️ No pude conectarme a tu Gmail para leer los avisos de Santander — "
+        "probablemente venció o se revocó la contraseña de aplicación. "
+        "Generá una nueva en myaccount.google.com/apppasswords y actualizala "
+        "para que vuelva a detectar tus compras y transferencias automáticamente.",
+        token,
+    )
+
+
 async def sync_gmail_for_user(usuario_id: str, gmail_email: str, gmail_app_password: str, token: str) -> dict:
     """Procesa los mails no leídos de Santander de un usuario. Aísla fallos por mail."""
     supabase = get_supabase()
@@ -244,6 +290,7 @@ async def sync_gmail_for_user(usuario_id: str, gmail_email: str, gmail_app_passw
     except Exception:
         logger.warning("gmail_sync: fallo de login IMAP para usuario_id=%s", usuario_id)
         stats["errores"] += 1
+        await _avisar_fallo_login(usuario_id, token)
         return stats
 
     try:
