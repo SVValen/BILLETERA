@@ -279,10 +279,13 @@ async def _avisar_fallo_login(usuario_id: str, token: str) -> None:
     )
 
 
+_MAX_DETALLE_ERRORES = 5
+
+
 async def sync_gmail_for_user(usuario_id: str, gmail_email: str, gmail_app_password: str, token: str) -> dict:
     """Procesa los mails no leídos de Santander de un usuario. Aísla fallos por mail."""
     supabase = get_supabase()
-    stats = {"vistos": 0, "procesados": 0, "pendientes_tarjeta": 0, "ignorados": 0, "errores": 0}
+    stats = {"vistos": 0, "procesados": 0, "pendientes_tarjeta": 0, "ignorados": 0, "errores": 0, "errores_detalle": []}
 
     try:
         imap = imaplib.IMAP4_SSL(IMAP_HOST)
@@ -305,6 +308,7 @@ async def sync_gmail_for_user(usuario_id: str, gmail_email: str, gmail_app_passw
         msg_nums = data[0].split()
         for num in msg_nums:
             stats["vistos"] += 1
+            tipo = None
             try:
                 status, msg_data = imap.fetch(num, "(BODY.PEEK[])")
                 if status != "OK" or not msg_data or not msg_data[0]:
@@ -354,9 +358,16 @@ async def sync_gmail_for_user(usuario_id: str, gmail_email: str, gmail_app_passw
                 }).execute()
                 imap.store(num, "+FLAGS", "\\Seen")
                 stats["procesados"] += 1
-            except Exception:
-                logger.warning("gmail_sync: error procesando un mail para usuario_id=%s", usuario_id)
+            except Exception as e:
+                # Nunca incluir el mensaje de la excepción: puede traer monto/descripción/body
+                # (ej. un error de Supabase al insertar incluye el payload). Solo tipo + clase.
+                logger.warning(
+                    "gmail_sync: error procesando mail tipo=%s (%s) para usuario_id=%s",
+                    tipo, type(e).__name__, usuario_id,
+                )
                 stats["errores"] += 1
+                if len(stats["errores_detalle"]) < _MAX_DETALLE_ERRORES:
+                    stats["errores_detalle"].append(f"tipo={tipo} exc={type(e).__name__}")
     finally:
         try:
             imap.logout()
@@ -375,7 +386,7 @@ async def sync_gmail_all_users(token: str = "") -> dict:
     supabase = get_supabase()
     rows = supabase.table("usuario_gmail_config").select("*").eq("activo", True).execute()
 
-    total = {"usuarios": 0, "vistos": 0, "procesados": 0, "pendientes_tarjeta": 0, "ignorados": 0, "errores": 0}
+    total = {"usuarios": 0, "vistos": 0, "procesados": 0, "pendientes_tarjeta": 0, "ignorados": 0, "errores": 0, "errores_detalle": []}
     for cfg in (rows.data or []):
         usuario_id = str(cfg["usuario_id"])
         try:
@@ -383,8 +394,12 @@ async def sync_gmail_all_users(token: str = "") -> dict:
             total["usuarios"] += 1
             for k in ("vistos", "procesados", "pendientes_tarjeta", "ignorados", "errores"):
                 total[k] += stats.get(k, 0)
-        except Exception:
-            logger.warning("gmail_sync: fallo no aislado para usuario_id=%s", usuario_id)
+            if len(total["errores_detalle"]) < _MAX_DETALLE_ERRORES:
+                total["errores_detalle"].extend(stats.get("errores_detalle", []))
+        except Exception as e:
+            logger.warning("gmail_sync: fallo no aislado (%s) para usuario_id=%s", type(e).__name__, usuario_id)
             total["errores"] += 1
+            if len(total["errores_detalle"]) < _MAX_DETALLE_ERRORES:
+                total["errores_detalle"].append(f"fallo_no_aislado exc={type(e).__name__}")
 
     return total
