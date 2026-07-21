@@ -32,6 +32,52 @@ async def get_recurrentes_proximos(request: Request):
     if err:
         return err
 
+    if request.query_params.get("resource") == "ingresos_mes":
+        from lib.date_utils import mes_rango, validate_mes
+        mes = request.query_params.get("mes", "")
+        if not validate_mes(mes):
+            return JSONResponse({"error": "Formato de mes inválido (YYYY-MM)"}, status_code=400)
+
+        supabase = get_supabase()
+        recs_r = (
+            supabase.table("recurrentes")
+            .select("id, descripcion, monto")
+            .eq("usuario_id", telegram_id)
+            .eq("tipo", "ingreso")
+            .eq("activo", True)
+            .execute()
+        )
+        recs = recs_r.data or []
+        if not recs:
+            return JSONResponse([])
+
+        start, end = mes_rango(mes)
+        movs_r = (
+            supabase.table("movimientos")
+            .select("descripcion, monto")
+            .eq("usuario_id", telegram_id)
+            .eq("tipo", "ingreso")
+            .neq("estado", "anulado")
+            .gte("fecha", start)
+            .lt("fecha", end)
+            .execute()
+        )
+        registrados: dict[str, float] = {}
+        for m in (movs_r.data or []):
+            registrados[m["descripcion"]] = registrados.get(m["descripcion"], 0) + m["monto"]
+
+        result = [
+            {
+                "id": r["id"],
+                "descripcion": r["descripcion"],
+                "monto_esperado": r["monto"],
+                "monto_registrado": registrados.get(r["descripcion"]),
+                "registrado": r["descripcion"] in registrados,
+            }
+            for r in recs
+        ]
+        return JSONResponse(result)
+
     try:
         dias = max(1, int(request.query_params.get("dias", "35")))
     except ValueError:

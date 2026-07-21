@@ -49,10 +49,27 @@ interface MovDetalle {
   forma_pago: string
 }
 
+interface IngresoMes {
+  id: number
+  descripcion: string
+  monto_esperado: number
+  monto_registrado: number | null
+  registrado: boolean
+}
+
+interface PrestamoMes {
+  prestamo_id: number
+  nombre: string
+  monto: number
+  pagado: boolean
+}
+
 export default function DetalleMensualTab({ mes }: { mes: string }) {
   const [cuotas, setCuotas] = useState<Cuota[]>([])
   const [recurrentes, setRecurrentes] = useState<Recurrente[]>([])
   const [tarjetas, setTarjetas] = useState<TarjetaResumen[]>([])
+  const [ingresosMes, setIngresosMes] = useState<IngresoMes[]>([])
+  const [prestamosMes, setPrestamosMes] = useState<PrestamoMes[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [expanded, setExpanded] = useState<number | null>(null)
@@ -65,17 +82,21 @@ export default function DetalleMensualTab({ mes }: { mes: string }) {
       setLoading(true)
       setError(null)
       try {
-        const [cRes, rRes, tRes] = await Promise.all([
+        const [cRes, rRes, tRes, iRes, pRes] = await Promise.all([
           fetchWithAuth(`/api/cuotas?mes=${mes}`),
           fetchWithAuth(`/api/recurrentes?dias=35`),
           fetchWithAuth(`/api/stats?mes=${mes}&resource=tarjetas`),
+          fetchWithAuth(`/api/recurrentes?resource=ingresos_mes&mes=${mes}`),
+          fetchWithAuth(`/api/inversiones?resource=prestamos_mes&mes=${mes}`),
         ])
         if (cancelled) return
-        const [cData, rData, tData] = await Promise.all([cRes.json(), rRes.json(), tRes.json()])
+        const [cData, rData, tData, iData, pData] = await Promise.all([cRes.json(), rRes.json(), tRes.json(), iRes.json(), pRes.json()])
         if (cancelled) return
         setCuotas(Array.isArray(cData) ? cData : [])
         setRecurrentes(Array.isArray(rData) ? rData : [])
         setTarjetas(Array.isArray(tData?.tarjetas) ? tData.tarjetas : [])
+        setIngresosMes(Array.isArray(iData) ? iData : [])
+        setPrestamosMes(Array.isArray(pData) ? pData : [])
         setExpanded(null)
         setDetalle({})
       } catch (e) {
@@ -112,8 +133,39 @@ export default function DetalleMensualTab({ mes }: { mes: string }) {
   const totalPagado = tarjetas.filter(t => t.pagado).reduce((s, t) => s + (t.monto_pagado ?? t.total), 0)
   const totalCuotasMensual = cuotas.reduce((s, c) => s + c.monto_cuota, 0)
 
+  const totalTarjetaMes = totalPendiente + totalPagado
+  const totalIngresosMes = ingresosMes.reduce((s, i) => s + (i.monto_registrado ?? i.monto_esperado), 0)
+  const totalPrestamoMes = prestamosMes.reduce((s, p) => s + p.monto, 0)
+  const montoLibre = totalIngresosMes - totalTarjetaMes - totalPrestamoMes
+
   return (
     <>
+      {/* Ingresos esperados del mes */}
+      {ingresosMes.length > 0 && (
+        <div className="widget-box">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18, flexWrap: 'wrap', gap: 8 }}>
+            <h3 className="widget-title" style={{ margin: 0 }}>💰 Ingresos — {mes}</h3>
+            <div style={{ textAlign: 'right' }}>
+              <div style={{ fontSize: 11, color: 'var(--fg3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.5px' }}>Total</div>
+              <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--b-green)', letterSpacing: '-0.3px' }}>{fmt(totalIngresosMes)}</div>
+            </div>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {ingresosMes.map(i => (
+              <div key={i.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 14 }}>
+                <span>{i.descripcion}</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  {i.registrado
+                    ? <BilleteraBadge variant="green">✅ Registrado</BilleteraBadge>
+                    : <BilleteraBadge variant="gold">⏳ Esperado</BilleteraBadge>}
+                  <span style={{ fontWeight: 700 }}>{fmt(i.monto_registrado ?? i.monto_esperado)}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Resumen por tarjeta del mes */}
       {tarjetas.length > 0 && (
         <div className="widget-box">
@@ -214,6 +266,42 @@ export default function DetalleMensualTab({ mes }: { mes: string }) {
         </div>
       )}
 
+      {/* Cuota de préstamos del mes */}
+      {prestamosMes.length > 0 && (
+        <div className="widget-box">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, flexWrap: 'wrap', gap: 8 }}>
+            <h3 className="widget-title" style={{ margin: 0 }}>🚗 Préstamo — {mes}</h3>
+            <div style={{ fontSize: 20, fontWeight: 800, letterSpacing: '-0.3px' }}>{fmt(totalPrestamoMes)}</div>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {prestamosMes.map(p => (
+              <div key={p.prestamo_id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 14 }}>
+                <span>{p.nombre}</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  {p.pagado
+                    ? <BilleteraBadge variant="green">✅ Pagada</BilleteraBadge>
+                    : <BilleteraBadge variant="gold">⏳ Pendiente</BilleteraBadge>}
+                  <span style={{ fontWeight: 700 }}>{fmt(p.monto)}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Monto libre: ingresos - tarjeta - préstamo */}
+      {(ingresosMes.length > 0 || tarjetas.length > 0 || prestamosMes.length > 0) && (
+        <div className="widget-box">
+          <h3 className="widget-title">🧮 Te queda libre</h3>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 13, color: 'var(--fg3)', marginBottom: 10 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Ingresos</span><span>{fmt(totalIngresosMes)}</span></div>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>- Tarjeta</span><span>{fmt(totalTarjetaMes)}</span></div>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>- Cuota préstamo</span><span>{fmt(totalPrestamoMes)}</span></div>
+          </div>
+          <p className={`card-value ${montoLibre >= 0 ? 'ingreso' : 'gasto'}`} style={{ margin: 0 }}>{fmt(montoLibre)}</p>
+        </div>
+      )}
+
       {/* Cuotas en proceso */}
       {cuotas.length > 0 && (
         <div className="widget-box">
@@ -276,7 +364,7 @@ export default function DetalleMensualTab({ mes }: { mes: string }) {
         </div>
       )}
 
-      {tarjetas.length === 0 && cuotas.length === 0 && recurrentes.length === 0 && (
+      {tarjetas.length === 0 && cuotas.length === 0 && recurrentes.length === 0 && ingresosMes.length === 0 && prestamosMes.length === 0 && (
         <p className="empty">Sin cuotas, recordatorios ni tarjetas este mes. 🎉</p>
       )}
     </>

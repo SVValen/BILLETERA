@@ -243,6 +243,40 @@ async def inversiones_get(request: Request):
             })
         return JSONResponse(result)
 
+    # ── cuota de préstamos que vence en un mes dado ────────────────────────────
+    if resource == "prestamos_mes":
+        from lib.date_utils import validate_mes
+        mes = request.query_params.get("mes", "")
+        if not validate_mes(mes):
+            return JSONResponse({"error": "Formato de mes inválido (YYYY-MM)"}, status_code=400)
+
+        prest_r = (
+            supabase.table("prestamos")
+            .select("id, nombre")
+            .eq("usuario_id", telegram_id)
+            .eq("activo", True)
+            .execute()
+        )
+        result = []
+        for p in (prest_r.data or []):
+            cuota_r = (
+                supabase.table("prestamo_cuotas")
+                .select("monto_ordinario, capital, pagado")
+                .eq("prestamo_id", p["id"])
+                .eq("mes_previsto", mes)
+                .limit(1)
+                .execute()
+            )
+            if not cuota_r.data:
+                continue
+            c = cuota_r.data[0]
+            monto = c.get("monto_ordinario") or c.get("capital") or 0
+            result.append({
+                "prestamo_id": p["id"], "nombre": p["nombre"],
+                "monto": monto, "pagado": c["pagado"],
+            })
+        return JSONResponse(result)
+
     # ── prestamo_cuotas ───────────────────────────────────────────────────────
     if resource == "prestamo_cuotas":
         prestamo_id = request.query_params.get("prestamo_id")
