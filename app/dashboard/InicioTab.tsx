@@ -31,6 +31,8 @@ interface Stats {
   total_pagado: number
   total_ingresos: number
   saldo: number
+  efectivo_1pago: number
+  tarjeta_1pago: number
   por_categoria: Record<string, { monto: number; emoji: string }>
 }
 
@@ -102,6 +104,10 @@ export default function InicioTab({ mes }: { mes: string }) {
   const pieData = cats.map(c => ({ ...c, pct: total > 0 ? Math.round(c.value / total * 100) : 0 }))
 
   const barData = [{ name: mes, Consumo: stats.total_gastos, Pagado: stats.total_pagado, Ingresos: stats.total_ingresos }]
+
+  const total1Pago = stats.efectivo_1pago + stats.tarjeta_1pago
+  const efectivoPct = total1Pago > 0 ? Math.round(stats.efectivo_1pago / total1Pago * 100) : 0
+  const tarjetaPct = total1Pago > 0 ? 100 - efectivoPct : 0
 
   return (
     <>
@@ -184,6 +190,22 @@ export default function InicioTab({ mes }: { mes: string }) {
           </ResponsiveContainer>
         </div>
       </div>
+
+      {/* Efectivo vs Tarjeta (solo consumo en 1 pago) */}
+      {total1Pago > 0 && (
+        <div className="widget-box">
+          <h3 className="widget-title" title="Compras en efectivo vs. con tarjeta en 1 pago — no incluye cuotas ni pago de resumen">
+            💵💳 Efectivo vs Tarjeta
+          </h3>
+          <div className="progress-bar" style={{ height: 10, marginBottom: 10 }}>
+            <div className="progress-fill" style={{ width: `${efectivoPct}%`, background: 'var(--b-green)' }} />
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14 }}>
+            <span>💵 Efectivo: <b>{fmt(stats.efectivo_1pago)}</b> <span className="muted">({efectivoPct}%)</span></span>
+            <span>💳 Tarjeta: <b>{fmt(stats.tarjeta_1pago)}</b> <span className="muted">({tarjetaPct}%)</span></span>
+          </div>
+        </div>
+      )}
 
       {/* Comparado con el mes pasado */}
       {metricas && (

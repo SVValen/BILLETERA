@@ -152,7 +152,7 @@ async def get_stats(request: Request):
 
     response = (
         supabase.table("movimientos")
-        .select("monto, tipo, tarjeta_id, es_pago_tarjeta, categorias(nombre, emoji)")
+        .select("monto, tipo, descripcion, tarjeta_id, es_pago_tarjeta, categorias(nombre, emoji)")
         .eq("usuario_id", telegram_id)
         .neq("estado", "anulado")
         .gte("fecha", start)
@@ -176,6 +176,14 @@ async def get_stats(request: Request):
     total_pagado = sum(r["monto"] for r in flujo_caja)
     total_ingresos = sum(r["monto"] for r in ingresos)
 
+    # Efectivo vs. tarjeta — solo consumos en 1 pago (excluye cuotas, que se
+    # cuentan mes a mes por separado y distorsionarían la comparación).
+    efectivo_1pago = sum(r["monto"] for r in consumo if not r.get("tarjeta_id"))
+    tarjeta_1pago = sum(
+        r["monto"] for r in consumo
+        if r.get("tarjeta_id") and not _CUOTA_RE.search(r.get("descripcion") or "")
+    )
+
     por_categoria: dict[str, dict] = {}
     for r in consumo:
         cat = r.get("categorias") or {}
@@ -191,5 +199,7 @@ async def get_stats(request: Request):
         "total_pagado": total_pagado,
         "total_ingresos": total_ingresos,
         "saldo": total_ingresos - total_pagado,
+        "efectivo_1pago": efectivo_1pago,
+        "tarjeta_1pago": tarjeta_1pago,
         "por_categoria": por_categoria,
     })

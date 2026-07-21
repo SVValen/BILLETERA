@@ -237,3 +237,30 @@ async def patch_movement(request: Request):
         await _save_learned_keywords(descripcion, int(categoria_id), telegram_id)
 
     return JSONResponse({"ok": True, "data": r.data[0]})
+
+
+@app.delete("/api/movements")
+async def delete_movement(request: Request):
+    """Borra un movimiento desde el dashboard. Nunca DELETE físico — marca estado='anulado'
+    (misma regla que el /borrar del bot)."""
+    telegram_id, err = await get_telegram_id_from_request(request)
+    if err:
+        return err
+
+    id_ = request.query_params.get("id")
+    if not id_:
+        return JSONResponse({"error": "Falta id"}, status_code=400)
+
+    supabase = get_supabase()
+    r = (
+        supabase.table("movimientos")
+        .update({"estado": "anulado"})
+        .eq("id", int(id_))
+        .eq("usuario_id", telegram_id)
+        .neq("estado", "anulado")
+        .execute()
+    )
+    if not r.data:
+        return JSONResponse({"error": "Movimiento no encontrado"}, status_code=404)
+
+    return JSONResponse({"ok": True})

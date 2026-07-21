@@ -122,6 +122,12 @@ export default function MovimientosTab({ mes }: { mes: string }) {
     await fetch_()
   }
 
+  async function borrar(movId: number, descripcion: string) {
+    if (!confirm(`¿Borrar "${descripcion}"?`)) return
+    await fetchWithAuth(`/api/movements?id=${movId}`, { method: 'DELETE' })
+    await fetch_()
+  }
+
   return (
     <div className="tab-content">
       <div className="section-header">
@@ -224,6 +230,7 @@ export default function MovimientosTab({ mes }: { mes: string }) {
                     <th>Forma de pago</th>
                     <th>Origen</th>
                     <th className="right">Monto</th>
+                    <th></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -276,6 +283,9 @@ export default function MovimientosTab({ mes }: { mes: string }) {
                       <td className="muted">{m.origen}</td>
                       <td className={`right ${m.tipo}`}>
                         {m.tipo === 'gasto' ? '-' : '+'}{fmt(m.monto)}
+                      </td>
+                      <td className="right">
+                        <button className="btn-icon" onClick={() => borrar(m.id, m.descripcion)} title="Borrar">🗑️</button>
                       </td>
                     </tr>
                   ))}
