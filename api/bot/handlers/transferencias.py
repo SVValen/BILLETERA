@@ -10,6 +10,11 @@ async def handle_transferencia_text(text: str, user_id: str, chat_id: int, token
     esperando_edicion_monto / tope_variable IS NULL). Guarda la descripción y
     siempre pide la categoría con botones — no auto-categoriza en silencio,
     porque el usuario pidió confirmar categoría + descripción en cada transferencia.
+
+    Si llegaron varias transferencias antes de que el usuario respondiera (ej. el
+    cron detectó 3 en una corrida), se resuelven en orden de llegada (más vieja
+    primero) — antes tomaba siempre la más reciente y las anteriores quedaban
+    huérfanas para siempre esperando una descripción que nunca llegaba.
     """
     supabase = get_supabase()
     pending = (
@@ -17,7 +22,7 @@ async def handle_transferencia_text(text: str, user_id: str, chat_id: int, token
         .select("id, monto")
         .eq("usuario_id", user_id)
         .eq("estado", "pendiente_descripcion_transferencia")
-        .order("id", desc=True)
+        .order("id")
         .limit(1)
         .execute()
     )
@@ -38,4 +43,24 @@ async def handle_transferencia_text(text: str, user_id: str, chat_id: int, token
         token,
         reply_markup=_category_keyboard(mov["id"]),
     )
+
+    # Si queda otra transferencia pendiente de descripción, avisar de una para
+    # que el usuario sepa que tiene que responder de nuevo (si no, queda huérfana).
+    otra = (
+        supabase.table("movimientos")
+        .select("id, monto")
+        .eq("usuario_id", user_id)
+        .eq("estado", "pendiente_descripcion_transferencia")
+        .order("id")
+        .limit(1)
+        .execute()
+    )
+    if otra.data:
+        siguiente = otra.data[0]
+        await _send(
+            chat_id,
+            f"💸 También tenés otra transferencia pendiente de *${siguiente['monto']:,.0f}* — ¿qué descripción le pongo?",
+            token,
+        )
+
     return True

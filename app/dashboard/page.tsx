@@ -16,6 +16,10 @@ import CategoriasTab from './CategoriasTab'
 
 type Tab = 'inicio' | 'detalle' | 'presupuestos' | 'objetivos' | 'movimientos' | 'inversiones' | 'liquidez' | 'prestamos' | 'categorias'
 
+// Inversiones y Renta Fija ocultas por ahora (módulos sin uso) — reactivar
+// agregándolas de nuevo a TABS cuando se vuelvan a usar.
+const MODULOS_INVERSION_ACTIVOS = false
+
 const TABS: { id: Tab; label: string }[] = [
   { id: 'inicio', label: 'Inicio' },
   { id: 'detalle', label: 'Detalle mensual' },
@@ -23,8 +27,10 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'objetivos', label: 'Objetivos' },
   { id: 'movimientos', label: 'Movimientos' },
   { id: 'categorias', label: 'Categorías' },
-  { id: 'inversiones', label: '📈 Inversiones' },
-  { id: 'liquidez', label: '💼 Renta Fija' },
+  ...(MODULOS_INVERSION_ACTIVOS ? [
+    { id: 'inversiones' as const, label: '📈 Inversiones' },
+    { id: 'liquidez' as const, label: '💼 Renta Fija' },
+  ] : []),
   { id: 'prestamos', label: '🏦 Préstamos' },
 ]
 
@@ -116,8 +122,8 @@ export default function Dashboard() {
         {tab === 'objetivos' && <ObjetivosTab />}
         {tab === 'movimientos' && <MovimientosTab mes={mes} />}
         {tab === 'categorias' && <CategoriasTab />}
-        {tab === 'inversiones' && <InversionesTab />}
-        {tab === 'liquidez' && <LiquidezTab />}
+        {MODULOS_INVERSION_ACTIVOS && tab === 'inversiones' && <InversionesTab />}
+        {MODULOS_INVERSION_ACTIVOS && tab === 'liquidez' && <LiquidezTab />}
         {tab === 'prestamos' && <PrestamosTab />}
       </div>
     </>
