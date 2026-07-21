@@ -15,19 +15,60 @@ app = FastAPI()
 _CUOTA_RE = re.compile(r"\(cuota \d+/\d+\)")
 
 
+@app.put("/api/stats")
+async def put_stats(request: Request):
+    """?resource=categoria_prefs: togglea si una categoría se incluye en la
+    métrica Efectivo vs Tarjeta de InicioTab."""
+    telegram_id, err = await get_telegram_id_from_request(request)
+    if err:
+        return err
+
+    body = await request.json()
+    if body.get("resource") != "categoria_prefs":
+        return JSONResponse({"error": "resource inválido"}, status_code=400)
+
+    categoria_id = body.get("categoria_id")
+    incluir = body.get("incluir")
+    if categoria_id is None or incluir is None:
+        return JSONResponse({"error": "Faltan categoria_id/incluir"}, status_code=400)
+
+    supabase = get_supabase()
+    supabase.table("usuario_categoria_metrica").upsert(
+        {"usuario_id": telegram_id, "categoria_id": int(categoria_id), "incluir": bool(incluir)},
+        on_conflict="usuario_id,categoria_id",
+    ).execute()
+    return JSONResponse({"ok": True})
+
+
 @app.get("/api/stats")
 async def get_stats(request: Request):
     telegram_id, err = await get_telegram_id_from_request(request)
     if err:
         return err
 
+    supabase = get_supabase()
+
+    # ── categorías incluidas en la métrica Efectivo vs Tarjeta (checkboxes) ──
+    if request.query_params.get("resource") == "categoria_prefs":
+        cats_r = supabase.table("categorias").select("id, nombre, emoji").order("nombre").execute()
+        prefs_r = (
+            supabase.table("usuario_categoria_metrica")
+            .select("categoria_id, incluir")
+            .eq("usuario_id", telegram_id)
+            .execute()
+        )
+        prefs = {p["categoria_id"]: p["incluir"] for p in (prefs_r.data or [])}
+        result = [
+            {"id": c["id"], "nombre": c["nombre"], "emoji": c["emoji"], "incluir": prefs.get(c["id"], True)}
+            for c in (cats_r.data or [])
+        ]
+        return JSONResponse(result)
+
     mes = request.query_params.get("mes", "")
     if not mes:
         return JSONResponse({"error": "Falta parámetro 'mes'"}, status_code=400)
     if not validate_mes(mes):
         return JSONResponse({"error": "Formato de mes inválido (YYYY-MM)"}, status_code=400)
-
-    supabase = get_supabase()
 
     # ── resumen por tarjeta del mes de resumen (lo que corresponde pagar) ──
     if request.query_params.get("resource") == "tarjetas":
@@ -152,7 +193,7 @@ async def get_stats(request: Request):
 
     response = (
         supabase.table("movimientos")
-        .select("monto, tipo, descripcion, tarjeta_id, es_pago_tarjeta, categorias(nombre, emoji)")
+        .select("monto, tipo, descripcion, tarjeta_id, categoria_id, es_pago_tarjeta, categorias(nombre, emoji)")
         .eq("usuario_id", telegram_id)
         .neq("estado", "anulado")
         .gte("fecha", start)
@@ -177,10 +218,20 @@ async def get_stats(request: Request):
     total_ingresos = sum(r["monto"] for r in ingresos)
 
     # Efectivo vs. tarjeta — solo consumos en 1 pago (excluye cuotas, que se
-    # cuentan mes a mes por separado y distorsionarían la comparación).
-    efectivo_1pago = sum(r["monto"] for r in consumo if not r.get("tarjeta_id"))
+    # cuentan mes a mes por separado y distorsionarían la comparación), y solo
+    # las categorías que el usuario eligió incluir (checkboxes en InicioTab).
+    prefs_r = (
+        supabase.table("usuario_categoria_metrica")
+        .select("categoria_id, incluir")
+        .eq("usuario_id", telegram_id)
+        .execute()
+    )
+    excluidas = {p["categoria_id"] for p in (prefs_r.data or []) if not p["incluir"]}
+    consumo_metrica = [r for r in consumo if r.get("categoria_id") not in excluidas]
+
+    efectivo_1pago = sum(r["monto"] for r in consumo_metrica if not r.get("tarjeta_id"))
     tarjeta_1pago = sum(
-        r["monto"] for r in consumo
+        r["monto"] for r in consumo_metrica
         if r.get("tarjeta_id") and not _CUOTA_RE.search(r.get("descripcion") or "")
     )
 

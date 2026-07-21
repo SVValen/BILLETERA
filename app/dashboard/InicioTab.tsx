@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { fetchWithAuth } from '@/lib/fetch-with-auth'
-import { BilleteraAlert } from '@/app/components/design'
+import { BilleteraAlert, BilleteraButton } from '@/app/components/design'
 import {
   PieChart, Pie, Cell, Tooltip,
   BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer,
@@ -36,6 +36,13 @@ interface Stats {
   por_categoria: Record<string, { monto: number; emoji: string }>
 }
 
+interface CategoriaPref {
+  id: number
+  nombre: string
+  emoji: string
+  incluir: boolean
+}
+
 interface Metricas {
   mes: string
   mes_anterior: string
@@ -64,6 +71,8 @@ export default function InicioTab({ mes }: { mes: string }) {
   const [metricas, setMetricas] = useState<Metricas | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [catPrefs, setCatPrefs] = useState<CategoriaPref[]>([])
+  const [editandoCats, setEditandoCats] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -90,6 +99,22 @@ export default function InicioTab({ mes }: { mes: string }) {
     load()
     return () => { cancelled = true }
   }, [mes])
+
+  useEffect(() => {
+    fetchWithAuth('/api/stats?resource=categoria_prefs')
+      .then(r => r.json())
+      .then(data => setCatPrefs(Array.isArray(data) ? data : []))
+      .catch(() => {})
+  }, [])
+
+  async function toggleCategoria(id: number, incluir: boolean) {
+    setCatPrefs(prev => prev.map(c => c.id === id ? { ...c, incluir } : c))
+    await fetchWithAuth('/api/stats', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ resource: 'categoria_prefs', categoria_id: id, incluir }),
+    })
+  }
 
   if (loading) return <p className="loading">Cargando...</p>
   if (error) return <BilleteraAlert variant="danger" title="Error">{error}</BilleteraAlert>
@@ -192,20 +217,48 @@ export default function InicioTab({ mes }: { mes: string }) {
       </div>
 
       {/* Efectivo vs Tarjeta (solo consumo en 1 pago) */}
-      {total1Pago > 0 && (
-        <div className="widget-box">
-          <h3 className="widget-title" title="Compras en efectivo vs. con tarjeta en 1 pago — no incluye cuotas ni pago de resumen">
-            💵💳 Efectivo vs Tarjeta
-          </h3>
-          <div className="progress-bar" style={{ height: 10, marginBottom: 10 }}>
-            <div className="progress-fill" style={{ width: `${efectivoPct}%`, background: 'var(--b-green)' }} />
+      <div className="widget-box">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+            <h3 className="widget-title" style={{ margin: 0 }} title="Compras en efectivo vs. con tarjeta en 1 pago — no incluye cuotas ni pago de resumen">
+              💵💳 Efectivo vs Tarjeta
+            </h3>
+            <BilleteraButton variant="ghost" size="sm" onClick={() => setEditandoCats(v => !v)}>
+              {editandoCats ? 'Listo' : '⚙️ Categorías'}
+            </BilleteraButton>
           </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14 }}>
-            <span>💵 Efectivo: <b>{fmt(stats.efectivo_1pago)}</b> <span className="muted">({efectivoPct}%)</span></span>
-            <span>💳 Tarjeta: <b>{fmt(stats.tarjeta_1pago)}</b> <span className="muted">({tarjetaPct}%)</span></span>
-          </div>
-        </div>
-      )}
+
+          {editandoCats ? (
+            <div style={{ marginTop: 14 }}>
+              <p className="muted" style={{ fontSize: 12, marginBottom: 10 }}>
+                Elegí qué categorías se cuentan en esta métrica.
+              </p>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 8 }}>
+                {catPrefs.map(c => (
+                  <label key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={c.incluir}
+                      onChange={e => toggleCategoria(c.id, e.target.checked)}
+                    />
+                    {c.emoji} {c.nombre}
+                  </label>
+                ))}
+              </div>
+            </div>
+          ) : total1Pago > 0 ? (
+            <div style={{ marginTop: 14 }}>
+              <div className="progress-bar" style={{ height: 10, marginBottom: 10 }}>
+                <div className="progress-fill" style={{ width: `${efectivoPct}%`, background: 'var(--b-green)' }} />
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14 }}>
+                <span>💵 Efectivo: <b>{fmt(stats.efectivo_1pago)}</b> <span className="muted">({efectivoPct}%)</span></span>
+                <span>💳 Tarjeta: <b>{fmt(stats.tarjeta_1pago)}</b> <span className="muted">({tarjetaPct}%)</span></span>
+              </div>
+            </div>
+          ) : (
+            <p className="muted" style={{ fontSize: 13, marginTop: 10 }}>Sin consumos en 1 pago este mes (con las categorías incluidas).</p>
+          )}
+      </div>
 
       {/* Comparado con el mes pasado */}
       {metricas && (

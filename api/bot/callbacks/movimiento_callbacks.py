@@ -287,11 +287,12 @@ async def handle_movimiento_callback(
             supabase.table("recurrentes").update(
                 {"ultimo_recordatorio": date.today().isoformat()}
             ).eq("id", rec_id).execute()
+            signo = "-" if r["tipo"] == "gasto" else "+"
             if token:
                 await _answer_callback(callback_id, token)
                 await _edit_message(chat_id, message_id,
-                    f"✅ Registrado: -{r['descripcion']} ${r['monto']:,.0f}", token)
-            if token:
+                    f"✅ Registrado: {signo}{r['descripcion']} ${r['monto']:,.0f}", token)
+            if token and r["tipo"] == "gasto":
                 await _check_presupuesto_alert(
                     usuario_id=r["usuario_id"], categoria_id=r["categoria_id"],
                     chat_id=chat_id, token=token

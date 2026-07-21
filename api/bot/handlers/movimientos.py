@@ -160,8 +160,8 @@ async def _process_text(text: str, user_id: str, chat_id: int, token: str) -> No
         await _send(chat_id, "El monto debe ser mayor a cero 🤔", token, parse_mode="")
         return
 
-    # ── Gasto recurrente ──
-    if dia_mes and tipo == "gasto":
+    # ── Recurrente (gasto o ingreso fijo, ej. sueldo) ──
+    if dia_mes:
         await _registrar_recurrente(text, monto, descripcion, tipo, dia_mes, user_id, chat_id, token)
         return
 
