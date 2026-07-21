@@ -136,7 +136,10 @@ async def _procesar_parsed(usuario_id: str, tipo: str, parsed: dict, token: str)
     chat_id = int(usuario_id)
     supabase = get_supabase()
 
-    if tipo in (TIPO_PAGO_1_PAGO, TIPO_PAGO_CUOTAS):
+    # TIPO_DEBITO_AUTOMATICO = débito automático EN TARJETA DE CRÉDITO (ej. Netflix,
+    # Apple — ver docstring del módulo). Va con el resto de compras de crédito en 1
+    # pago, no con TIPO_PAGO_DEBITO (tarjeta de débito real, que sí es efectivo).
+    if tipo in (TIPO_PAGO_1_PAGO, TIPO_PAGO_CUOTAS, TIPO_DEBITO_AUTOMATICO):
         tarjeta_id = await _resolver_tarjeta_last4(usuario_id, parsed["last4"], token)
         if tarjeta_id is None:
             return False, None, None
@@ -147,7 +150,7 @@ async def _procesar_parsed(usuario_id: str, tipo: str, parsed: dict, token: str)
         mes_resumen = calcular_mes_resumen(hoy, dia_cierre) if dia_cierre else hoy.strftime("%Y-%m")
         categoria_id = await _categorize(parsed["descripcion"], usuario_id)
 
-        if tipo == TIPO_PAGO_1_PAGO:
+        if tipo in (TIPO_PAGO_1_PAGO, TIPO_DEBITO_AUTOMATICO):
             ins = supabase.table("movimientos").insert({
                 "usuario_id": usuario_id,
                 "fecha": parsed["fecha"],
@@ -213,7 +216,8 @@ async def _procesar_parsed(usuario_id: str, tipo: str, parsed: dict, token: str)
         )
         return True, mov_id, None
 
-    # TIPO_DEBITO_AUTOMATICO / TIPO_PAGO_DEBITO — todo lo que no es tarjeta de crédito se registra como efectivo
+    # TIPO_PAGO_DEBITO — tarjeta de débito real: sale directo de la cuenta, se
+    # registra como efectivo (no tiene resumen mensual ni tarjeta asociada).
     monto = parsed["monto"]
     descripcion = parsed["descripcion"]
     if parsed["moneda"] == "USD":
