@@ -88,6 +88,20 @@ async def get_stats(request: Request):
     if not validate_mes(mes):
         return JSONResponse({"error": "Formato de mes inválido (YYYY-MM)"}, status_code=400)
 
+    # ── pestaña Mes: Entra / Sale / Te queda con estado de pago por grupo ──
+    resource = request.query_params.get("resource")
+    if resource in ("mes", "proximos", "rubros"):
+        from lib import mes as mes_lib
+        if resource == "mes":
+            return JSONResponse(mes_lib.resumen(telegram_id, mes))
+        if resource == "proximos":
+            try:
+                n = max(1, min(12, int(request.query_params.get("n", "6"))))
+            except ValueError:
+                n = 6
+            return JSONResponse({"desde": mes, "meses": mes_lib.proximos(telegram_id, mes, n)})
+        return JSONResponse(mes_lib.por_rubro(telegram_id, mes))
+
     # ── planilla del mes: todas las filas del mes de pago, como el Excel ──
     if request.query_params.get("resource") == "planilla":
         rows = (

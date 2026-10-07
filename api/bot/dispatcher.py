@@ -13,7 +13,9 @@ from .handlers.tarjetas import (
     handle_cierre_cmd, handle_cierre_callback,
 )
 from .handlers.recurrentes import handle_recurrente_text
-from .handlers.transferencias import handle_transferencia_text
+from .handlers.transferencias import (
+    handle_transferencia_text, handle_transferencia_callback, handle_transferencias_cmd,
+)
 from .handlers.expensas import handle_documento
 from .handlers.alquiler import handle_alquiler_cmd, handle_alquiler_callback, handle_descuento_text
 from .handlers.prestamos import handle_prestamo_callback, handle_prestamos_cmd, detect_prestamo_text
@@ -39,6 +41,8 @@ async def dispatch_callback(cq: dict, token: str) -> None:
     if await handle_alquiler_callback(parts, callback_id, chat_id, message_id, user_id, token):
         return
     if await handle_cierre_callback(parts, callback_id, chat_id, message_id, user_id, token):
+        return
+    if await handle_transferencia_callback(parts, callback_id, chat_id, message_id, user_id, token):
         return
 
 
@@ -191,6 +195,11 @@ async def dispatch_message(message: dict, token: str) -> None:
     if text.lower().startswith("/alquiler"):
         if token:
             await handle_alquiler_cmd(text, user_id, chat_id, token)
+        return
+
+    if text.lower().startswith("/transferencias"):
+        if token:
+            await handle_transferencias_cmd(user_id, chat_id, token)
         return
 
     if text.lower().startswith("/prestamos"):

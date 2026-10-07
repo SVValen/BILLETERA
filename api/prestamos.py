@@ -133,6 +133,11 @@ async def prestamos_post(request: Request):
     # ── pagar_cuota: marca pagada la cuota del préstamo que cae en `mes` ──────
     if resource == "pagar_cuota":
         from lib.pagos import pagar_cuota_prestamo
+        if body.get("cuota_id"):
+            cuota = pagar_cuota_prestamo(telegram_id, int(body["cuota_id"]))
+            if not cuota:
+                return JSONResponse({"error": "Cuota no encontrada"}, status_code=404)
+            return JSONResponse({"ok": True, "cuota": cuota})
         prestamo_id = body.get("prestamo_id")
         mes = body.get("mes", "")
         cuota_r = (

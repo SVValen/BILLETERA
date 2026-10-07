@@ -39,6 +39,7 @@ AYUDA = (
 
     "🏦 *Préstamos:*\n"
     "  `/prestamos` — ver estado del préstamo y pagar cuotas\n"
+    "  `/transferencias` — clasificar transferencias del Santander (qué pagaste con cada una)\n"
     "  _Al pagar, te ofrezco adelantar cuotas (Capital × 1.25)._\n\n"
 
     "📋 *Otros comandos:*\n"

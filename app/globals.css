@@ -541,3 +541,145 @@ td.date { color: var(--fg3); white-space: nowrap; font-size: 13px; }
 @media (max-width: 720px) {
   .planilla-columnas { grid-template-columns: 1fr; }
 }
+
+/* ── Pestañas Mes / Próximos / En qué gasto ─────────────────────────────── */
+:root {
+  --mes-sub: #4a5a63;
+  --mes-ok-bg: #E3EFE9;  --mes-ok-fg: #1F5040;
+  --mes-pend-bg: #FBF0C9; --mes-pend-fg: #6B5200;
+  --mes-queda-bg: #0D2B3E; --mes-queda-label: #BFD9D9; --mes-queda-fg: #F0C83C;
+  --mes-row-abierto: #FAF9F2;
+}
+html.dark {
+  --mes-sub: #9DB3C0;
+  --mes-ok-bg: #12352A;  --mes-ok-fg: #9FD8BF;
+  --mes-pend-bg: #3A3010; --mes-pend-fg: #F0D77A;
+  --mes-queda-bg: #0A1A24;
+  --mes-row-abierto: #1A2C3D;
+}
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+.mes { display: flex; flex-direction: column; gap: 20px; font-variant-numeric: tabular-nums; }
+.mes-nav { display: flex; align-items: center; gap: 8px; }
+.mes-flecha { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border-radius: 10px; border: 1px solid var(--border); background: var(--bg2); color: var(--fg); cursor: pointer; }
+.mes-flecha:hover { border-color: var(--primary); }
+.mes-titulo { margin: 0; font-family: var(--font-display); font-size: 28px; font-weight: 700; min-width: 220px; text-align: center; }
+.mes-intro .mes-titulo { text-align: left; }
+.mes-intro p { margin: 6px 0 0; color: var(--mes-sub); font-size: 14px; }
+.mes-card { background: var(--bg2); border: 1px solid var(--b-cream-dk); border-radius: 16px; overflow: hidden; }
+.mes-hero { padding: 24px; }
+.mes-cuenta { display: flex; align-items: flex-end; gap: 28px; flex-wrap: wrap; }
+.mes-label { font-size: 13px; font-weight: 600; color: var(--mes-sub); }
+.mes-num { font-family: var(--font-display); font-size: 32px; font-weight: 700; }
+.mes-num-entra { color: var(--b-green); }
+html.dark .mes-num-entra { color: #7FCBA8; }
+.mes-op { font-family: var(--font-display); font-size: 28px; color: var(--fg2); padding-bottom: 4px; }
+.mes-queda { background: var(--mes-queda-bg); border-radius: 14px; padding: 12px 20px; }
+.mes-queda .mes-label { color: var(--mes-queda-label); }
+.mes-num-queda { font-family: var(--font-display); font-size: 40px; font-weight: 800; color: var(--mes-queda-fg); line-height: 1.1; }
+.mes-queda.negativo .mes-num-queda { color: #FF9C8F; }
+.mes-progreso { margin-top: 24px; }
+.mes-progreso-txt { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; font-size: 14px; margin-bottom: 8px; }
+.mes-barra { height: 12px; border-radius: 999px; background: var(--mes-pend-bg); overflow: hidden; }
+.mes-barra > div { height: 100%; background: var(--b-green); border-radius: 999px; }
+.mes-nota { margin: 14px 0 0; font-size: 13px; color: var(--mes-sub); }
+.mes-cols { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 20px; align-items: start; }
+.mes-card-head { display: flex; justify-content: space-between; align-items: baseline; padding: 18px 18px 12px; }
+.mes-card-head h3 { margin: 0; font-family: var(--font-display); font-size: 20px; }
+.mes-num-chico { font-weight: 700; }
+.mes-row { display: flex; align-items: center; gap: 10px; padding: 12px 18px; border-top: 1px solid var(--b-cream-dk); width: 100%; color: var(--fg); }
+.mes-row-btn { background: none; border-left: 0; border-right: 0; border-bottom: 0; font: inherit; text-align: left; cursor: pointer; min-height: 56px; }
+.mes-row-btn:hover { background: var(--mes-row-abierto); }
+.mes-grupo.abierto { background: var(--mes-row-abierto); }
+.mes-row-nombre { flex: 1; font-weight: 600; display: flex; flex-direction: column; min-width: 0; }
+.mes-row-sub { font-size: 12px; font-weight: 400; color: var(--mes-sub); }
+.mes-monto { font-weight: 600; min-width: 104px; text-align: right; }
+.mes-sub { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 6px 18px 6px 46px; font-size: 14px; color: var(--mes-sub); }
+.mes-entra .mes-sub { padding-left: 30px; }
+.mes-detalle { padding-bottom: 10px; }
+.mes-det { color: var(--mes-sub); font-size: 13px; }
+.mes-est { color: var(--mes-pend-fg); }
+.mes-monto-sub { min-width: 92px; text-align: right; color: var(--fg); }
+.mes-monto-btn { background: none; border: 0; border-bottom: 1px dashed var(--fg2); font: inherit; color: var(--fg); cursor: pointer; padding: 6px 0; min-height: 32px; }
+.mes-chip { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 999px; white-space: nowrap; }
+.mes-chip-ok { background: var(--mes-ok-bg); color: var(--mes-ok-fg); }
+.mes-chip-pend { background: var(--mes-pend-bg); color: var(--mes-pend-fg); }
+.mes-chip-mini { font-size: 11px; padding: 1px 7px; margin-left: 6px; }
+.mes-ok-mini { color: var(--mes-ok-fg); display: inline-flex; }
+.mes-pagar { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 0 18px 14px 46px; font-size: 13px; color: var(--mes-sub); }
+.mes-inline { display: inline-flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.mes-input { font: inherit; font-size: 15px; height: 44px; padding: 0 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg2); color: var(--fg); width: 160px; }
+.mes-input:focus { outline: 2px solid var(--primary); outline-offset: 1px; }
+.mes-btn { font: inherit; font-size: 14px; font-weight: 600; border-radius: 10px; min-height: 44px; padding: 0 16px; cursor: pointer; }
+.mes-btn:disabled { opacity: .5; cursor: wait; }
+.mes-btn-pri { background: var(--b-navy); color: var(--b-white); border: 0; }
+.mes-btn-sec { background: var(--bg2); color: var(--fg); border: 1px solid var(--border); }
+.mes-btn-chico { min-height: 36px; padding: 0 12px; font-size: 13px; }
+.mes-btn-ancho { width: 100%; }
+.mes-link { background: none; border: 0; font: inherit; font-weight: 600; color: var(--primary); cursor: pointer; padding: 0; min-height: 44px; text-decoration: underline; text-underline-offset: 3px; }
+.mes-sin-detallar { font-style: italic; }
+.mes-pie { padding: 14px 18px 18px; border-top: 1px solid var(--b-cream-dk); margin-top: 8px; }
+.mes-form { display: grid; gap: 10px; }
+.mes-form label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--mes-sub); }
+.mes-form .mes-input { width: 100%; }
+.mes-form-btns { display: flex; gap: 8px; justify-content: flex-end; }
+.mes-vacio { padding: 0 18px 18px; color: var(--mes-sub); font-size: 14px; }
+.mes-adelante { padding: 18px 22px; display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }
+.mes-adelante > div { flex: 1; min-width: 240px; }
+.mes-adelante p { margin: 4px 0 0; font-size: 15px; }
+@media (max-width: 860px) {
+  .mes-cols { grid-template-columns: 1fr; }
+  .mes-sale { order: -1; }
+  .mes-cuenta { gap: 14px; }
+  .mes-op { display: none; }
+  .mes-queda { width: 100%; order: -1; }
+  .mes-num { font-size: 24px; }
+  .mes-titulo { font-size: 22px; min-width: 0; flex: 1; }
+  .mes-monto { min-width: 0; }
+  .mes-sub { padding-left: 30px; padding-right: 14px; }
+  .mes-row { padding: 12px 14px; }
+  .mes-pagar { padding-left: 14px; padding-right: 14px; }
+}
+
+/* Próximos meses */
+.prox-mes { border-top: 1px solid var(--b-cream-dk); }
+.prox-mes:first-child { border-top: 0; }
+.prox-row { display: grid; grid-template-columns: 20px 200px minmax(80px, 1fr) 200px 130px; align-items: center; gap: 14px; width: 100%; padding: 14px 18px; background: none; border: 0; font: inherit; color: var(--fg); text-align: left; cursor: pointer; }
+.prox-row:hover { background: var(--mes-row-abierto); }
+.prox-nombre { font-weight: 600; }
+.prox-barras { display: flex; flex-direction: column; gap: 4px; }
+.prox-barra { display: block; height: 8px; border-radius: 0 4px 4px 0; }
+.prox-barra-entra { background: var(--b-green); }
+.prox-barra-sale { background: var(--b-teal); }
+.prox-cifras { display: flex; flex-direction: column; font-size: 13px; text-align: right; }
+.prox-queda { font-family: var(--font-display); font-weight: 700; font-size: 18px; text-align: right; }
+.prox-queda.negativo { color: var(--b-red); }
+.prox-detalle { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 24px; padding: 0 18px 16px 52px; }
+.prox-detalle h4 { margin: 4px 0; font-size: 13px; color: var(--mes-sub); }
+.prox-detalle .mes-sub { padding: 4px 0; }
+.prox-detalle .mes-link { grid-column: 1 / -1; justify-self: start; }
+.prox-leyenda { display: flex; gap: 18px; padding: 12px 18px; border-top: 1px solid var(--b-cream-dk); font-size: 12px; color: var(--mes-sub); }
+.prox-leyenda i { display: inline-block; width: 12px; height: 8px; border-radius: 0 4px 4px 0; margin-right: 6px; vertical-align: middle; }
+.prox-leyenda-queda { margin-left: auto; }
+@media (max-width: 700px) {
+  .prox-row { grid-template-columns: 20px 1fr auto; }
+  .prox-barras, .prox-cifras { display: none; }
+  .prox-detalle { grid-template-columns: 1fr; padding-left: 18px; }
+}
+
+/* En qué gasto */
+.rubros { width: 100%; min-width: 0; border-collapse: collapse; font-size: 14px; }
+.rubros th, .rubros td { padding: 10px 14px; border-top: 1px solid var(--b-cream-dk); text-align: left; font-weight: 400; }
+.rubros thead th { background: none; text-transform: none; letter-spacing: 0; border-top: 0; font-size: 12px; font-weight: 600; color: var(--mes-sub); }
+.rubros tbody th { font-weight: 600; white-space: nowrap; text-transform: none; letter-spacing: 0; font-size: 14px; color: var(--fg); background: none; }
+.rubros .num { text-align: right; white-space: nowrap; }
+.rubros-barra-celda { width: 40%; }
+.rubros-barra { display: block; height: 10px; background: var(--b-teal); border-radius: 0 4px 4px 0; }
+.rubros tbody tr:hover { background: var(--mes-row-abierto); }
+.rubros-cambio { font-size: 12px; }
+@media (max-width: 700px) { .rubros-barra-celda { display: none; } .rubros th, .rubros td { padding: 10px; } }
+
+/* Sub-pestañas (Movimientos, Ajustes) */
+.subtabs { display: flex; gap: 6px; margin-bottom: 18px; flex-wrap: wrap; }
+.subtabs button { font: inherit; font-size: 14px; font-weight: 600; min-height: 40px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--border); background: var(--bg2); color: var(--fg); cursor: pointer; }
+.subtabs button.active { background: var(--b-navy); color: var(--b-white); border-color: var(--b-navy); }
+.prox-queda.sin-datos { font-family: var(--font-body); font-weight: 400; font-size: 13px; color: var(--mes-sub); }

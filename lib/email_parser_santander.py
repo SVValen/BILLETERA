@@ -27,6 +27,11 @@ _RE_CUOTAS = re.compile(r"Cuotas\s*(\d+)", re.IGNORECASE)
 _RE_COMERCIO = re.compile(r"Comercio\s*(.+?)\s*(?=Fecha)", re.IGNORECASE)
 _RE_FECHA = re.compile(r"Fecha\s*(\d{2}/\d{2}/\d{4})", re.IGNORECASE)
 _RE_IMPORTE = re.compile(r"Importe\s*\$\s*([\d.,]+)", re.IGNORECASE)
+_RE_DESTINATARIO = re.compile(
+    r"Destinatario\s*:?\s*(.+?)\s*(?=Cuenta de origen|CBU|CVU|Alias|Importe|Banco|\n|$)",
+    re.IGNORECASE | re.DOTALL,
+)
+_RE_CBU = re.compile(r"C[BV]U(?:\s+de\s+destino)?\s*:?\s*(\d{22})", re.IGNORECASE)
 
 
 def identificar_tipo_email(subject: str, body: str) -> str | None:
@@ -78,11 +83,16 @@ def parse_email(tipo: str, subject: str, body: str) -> dict | None:
         importe_m = _RE_IMPORTE.search(body)
         if not importe_m:
             return None
+        dest_m = _RE_DESTINATARIO.search(body)
+        cbu_m = _RE_CBU.search(body)
+        destinatario = dest_m.group(1).strip() if dest_m else None
         return {
             "monto": _parse_monto_ar(importe_m.group(1)),
             "moneda": "ARS",
             "descripcion": None,
             "fecha": None,
+            "destinatario": destinatario or None,
+            "cbu": cbu_m.group(1) if cbu_m else None,
         }
 
     last4_m = _RE_LAST4.search(body)

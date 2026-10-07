@@ -6,10 +6,8 @@ remitente de Santander: identifica el tipo, lo parsea, y lo rutea al mismo flujo
 confirmación de Telegram que ya existe para gastos tipeados a mano. Nunca registra
 nada en silencio. Dedup por Message-ID en `email_procesados`.
 
-El mail de transferencia (TIPO_TRANSFERENCIA) no trae comercio, así que se registra
-como efectivo con estado 'pendiente_descripcion_transferencia' y el bot le pregunta al
-usuario la descripción por Telegram antes de categorizar (mismo patrón sentinel que
-`esperando_edicion_monto` / `tope_variable IS NULL`).
+El mail de transferencia (TIPO_TRANSFERENCIA) no se carga como gasto: va a la tabla
+`transferencias` y el bot pregunta qué se pagó con ella (ver lib/transferencias.py).
 
 Nunca loguear monto, descripción ni body crudo del mail (regla de AGENTS.md) — solo
 contadores/tipos/usuario_id.
@@ -233,24 +231,19 @@ async def _procesar_parsed(usuario_id: str, tipo: str, parsed: dict, token: str)
         return True, None, plan_id
 
     if tipo == TIPO_TRANSFERENCIA:
-        ins = supabase.table("movimientos").insert({
-            "usuario_id": usuario_id,
-            "fecha": date.today().isoformat(),
-            "monto": parsed["monto"],
-            "tipo": "gasto",
-            "origen": "email",
-            "estado": "pendiente_descripcion_transferencia",
-        }).execute()
-        mov_id = ins.data[0]["id"] if ins.data else None
-        if not mov_id:
-            return False, None, None
-        await _send(
-            chat_id,
-            f"💸 Detecté una transferencia de *${parsed['monto']:,.0f}* — la registré como efectivo, "
-            "¿qué descripción le pongo?",
-            token,
+        # No es un gasto todavía: queda en `transferencias` y el bot pregunta qué se
+        # pagó con ella (tarjeta, préstamo, alquiler), si fue un gasto o un pase propio.
+        from lib import transferencias as trf_lib
+        trf = trf_lib.registrar(
+            usuario_id, parsed["monto"], parsed.get("fecha") or date.today().isoformat(),
+            parsed.get("destinatario"), parsed.get("cbu"),
         )
-        return True, mov_id, None
+        if not trf:
+            return False, None, None
+        if token:
+            await _send(chat_id, trf_lib.texto_pregunta(trf), token,
+                        reply_markup=trf_lib.teclado(usuario_id, trf))
+        return True, None, None
 
     # TIPO_PAGO_DEBITO — tarjeta de débito real: sale directo de la cuenta, se
     # registra como efectivo (no tiene resumen mensual ni tarjeta asociada).
@@ -387,6 +380,12 @@ async def sync_gmail_for_user(usuario_id: str, gmail_email: str, gmail_app_passw
                 else:
                     tipo = identificar_tipo_email(subject, body)
                     parsed = parse_email(tipo, subject, body) if tipo else None
+                    if parsed and not parsed.get("fecha"):
+                        # la transferencia no trae fecha en el cuerpo: la del mail
+                        try:
+                            parsed["fecha"] = parsedate_to_datetime(msg.get("Date")).date().isoformat()
+                        except Exception:
+                            parsed["fecha"] = date.today().isoformat()
 
                 if not tipo or not parsed:
                     supabase.table("email_procesados").insert({

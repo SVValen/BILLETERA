@@ -32,12 +32,17 @@ semanal). La base anterior quedó copiada en el esquema `backup_v1` de Supabase.
 - `alquiler_contrato` + `alquiler_canon` (canon por período, estimado hasta tener IPC)
 - `cotizaciones` (dólar mayorista BCRA A 3500 por día)
 - `familiares` + `familia_asignaciones` (qué compra/plan le corresponde a cada familiar y cuánto por mes) + `familia_manual` (entradas a mano con cuotas; solo afectan el panel Cuotas familia)
+- `transferencias`: avisos de transferencia del Santander. No son gastos: el bot pregunta qué se pagó (resumen de tarjeta, cuota de préstamo, alquiler), si fue un gasto o un pase entre cuentas propias; aprende por CBU
 - `recurrentes`, `presupuestos`, `keywords_aprendidas`, `email_procesados`, `usuario_gmail_config`, `perfiles`
 
 ## Reglas de negocio
 - `usuario_id` = Telegram ID; filtro manual en cada query (service role, sin RLS efectiva)
 - Nunca borrar movimientos: `estado='anulado'`
 - La planilla y los totales del mes se arman por `mes_resumen`, excluyendo `es_pago_tarjeta`
+- Cuenta del mes (`lib/mes.py`, una sola para todo el dashboard): Entra − Sale = Te queda. En Sale, una tarjeta
+  con el resumen pagado cuenta lo realmente pagado (`tarjeta_pagos.monto_pagado`); la diferencia con lo cargado es "sin detallar".
+  El estado de las cuotas de préstamo lo manda `prestamo_cuotas.pagado`
+- Transferencias a cuentas propias nunca se cargan como gasto ni duplican un pago ya marcado
 - Dólares: se guardan en pesos al **dólar BCRA** con `moneda='USD'`, `monto_original`, `tipo_cambio`
 - Montos ≤ 100 sin moneda → el bot pregunta USD / pesos / miles
 - Alquiler: se paga del 1 al 10, por adelantado; las expensas del mes son la **liquidación del mes
@@ -59,6 +64,7 @@ semanal). La base anterior quedó copiada en el esquema `backup_v1` de Supabase.
 | `/tarjetas`, `/tarjeta_nueva`, `/pagar_tarjeta` | Tarjetas y pago de resumen |
 | `/cierre santander 30/10` | Fecha real de cierre (tarjetas de cierre variable) |
 | `/prestamos` | Cuotas de préstamo |
+| `/transferencias` | Clasificar transferencias del Santander sin resolver (también llegan solas al detectar el mail) |
 | `/presupuesto`, `/recurrentes`, `/editar`, `/borrar`, `/id`, `/ayuda` | Utilidades |
 
 ## Mails (Gmail IMAP)
@@ -68,5 +74,5 @@ Santander (`lib/email_parser_santander.py`) y Naranja X (`lib/email_parser_naran
 `SUPABASE_SERVICE_ROLE_KEY`, `TELEGRAM_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, `CRON_SECRET`, `GROQ_API_KEY`
 
 ## Migraciones
-Archivos `schema_v2_*.sql`. Las migraciones desde el conector de Supabase se cancelan: correrlas en el
-SQL Editor. Los `schema_*.sql` anteriores son históricos (v1).
+Archivos `schema_v2_*.sql`. `apply_migration` del conector de Supabase se cancela; `execute_sql` sí corre DDL
+(o pegar el archivo en el SQL Editor). Los `schema_*.sql` anteriores son históricos (v1).

@@ -4,30 +4,39 @@ import { useEffect, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { createSupabaseBrowser } from '@/lib/supabase-browser'
 import { BilleteraButton } from '@/app/components/design'
-import InicioTab from './InicioTab'
+import MesTab from './MesTab'
+import ProximosTab from './ProximosTab'
+import GastosTab from './GastosTab'
 import PlanillaTab from './PlanillaTab'
 import FamiliaTab from './FamiliaTab'
-import DetalleMensualTab from './DetalleMensualTab'
 import PresupuestosTab from './PresupuestosTab'
 import MovimientosTab from './MovimientosTab'
 import PrestamosTab from './PrestamosTab'
 import CategoriasTab from './CategoriasTab'
 
-type Tab = 'inicio' | 'planilla' | 'familia' | 'detalle' | 'presupuestos' | 'movimientos' | 'prestamos' | 'categorias'
+type Tab = 'mes' | 'proximos' | 'gastos' | 'familia' | 'movimientos' | 'ajustes'
+type Ajuste = 'prestamos' | 'presupuestos' | 'categorias'
+type VistaMov = 'lista' | 'planilla'
 
 const TABS: { id: Tab; label: string }[] = [
-  { id: 'inicio', label: 'Inicio' },
-  { id: 'planilla', label: 'Planilla del mes' },
+  { id: 'mes', label: 'Mes' },
+  { id: 'proximos', label: 'Próximos meses' },
+  { id: 'gastos', label: 'En qué gasto' },
   { id: 'familia', label: 'Cuotas familia' },
-  { id: 'detalle', label: 'Detalle mensual' },
-  { id: 'presupuestos', label: 'Presupuestos' },
   { id: 'movimientos', label: 'Movimientos' },
+  { id: 'ajustes', label: 'Ajustes' },
+]
+
+const AJUSTES: { id: Ajuste; label: string }[] = [
+  { id: 'prestamos', label: 'Préstamos' },
+  { id: 'presupuestos', label: 'Presupuestos' },
   { id: 'categorias', label: 'Categorías' },
-  { id: 'prestamos', label: '🏦 Préstamos' },
 ]
 
 export default function Dashboard() {
-  const [tab, setTab] = useState<Tab>('inicio')
+  const [tab, setTab] = useState<Tab>('mes')
+  const [ajuste, setAjuste] = useState<Ajuste>('prestamos')
+  const [vistaMov, setVistaMov] = useState<VistaMov>('lista')
   const [mes, setMes] = useState(() => new Date().toISOString().slice(0, 7))
   const [telegramId, setTelegramId] = useState<string | null>(null)
   const [dark, setDark] = useState(false)
@@ -71,7 +80,7 @@ export default function Dashboard() {
     return <div className="auth-page"><p style={{ color: '#aaa' }}>Verificando sesión...</p></div>
   }
 
-  const showMes = tab === 'inicio' || tab === 'planilla' || tab === 'familia' || tab === 'detalle' || tab === 'presupuestos' || tab === 'movimientos'
+  const showMes = tab === 'gastos' || tab === 'familia' || tab === 'movimientos'
 
 
   return (
@@ -108,14 +117,31 @@ export default function Dashboard() {
       </div>
 
       <div className="page">
-        {tab === 'inicio' && <InicioTab mes={mes} />}
-        {tab === 'planilla' && <PlanillaTab mes={mes} />}
+        {tab === 'mes' && <MesTab mes={mes} onMes={setMes} onIr={t => setTab(t)} />}
+        {tab === 'proximos' && <ProximosTab desde={mes} onAbrirMes={m => { setMes(m); setTab('mes') }} />}
+        {tab === 'gastos' && <GastosTab mes={mes} />}
         {tab === 'familia' && <FamiliaTab mes={mes} />}
-        {tab === 'detalle' && <DetalleMensualTab mes={mes} />}
-        {tab === 'presupuestos' && <PresupuestosTab mes={mes} />}
-        {tab === 'movimientos' && <MovimientosTab mes={mes} />}
-        {tab === 'categorias' && <CategoriasTab />}
-        {tab === 'prestamos' && <PrestamosTab />}
+        {tab === 'movimientos' && (
+          <>
+            <div className="subtabs" role="tablist" aria-label="Vista de movimientos">
+              <button type="button" role="tab" aria-selected={vistaMov === 'lista'} className={vistaMov === 'lista' ? 'active' : ''} onClick={() => setVistaMov('lista')}>Lista</button>
+              <button type="button" role="tab" aria-selected={vistaMov === 'planilla'} className={vistaMov === 'planilla' ? 'active' : ''} onClick={() => setVistaMov('planilla')}>Como la planilla</button>
+            </div>
+            {vistaMov === 'lista' ? <MovimientosTab mes={mes} /> : <PlanillaTab mes={mes} />}
+          </>
+        )}
+        {tab === 'ajustes' && (
+          <>
+            <div className="subtabs" role="tablist" aria-label="Ajustes">
+              {AJUSTES.map(a => (
+                <button key={a.id} type="button" role="tab" aria-selected={ajuste === a.id} className={ajuste === a.id ? 'active' : ''} onClick={() => setAjuste(a.id)}>{a.label}</button>
+              ))}
+            </div>
+            {ajuste === 'prestamos' && <PrestamosTab />}
+            {ajuste === 'presupuestos' && <PresupuestosTab mes={mes} />}
+            {ajuste === 'categorias' && <CategoriasTab />}
+          </>
+        )}
       </div>
     </>
   )

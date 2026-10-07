@@ -1,11 +1,11 @@
 # ARCHITECTURE.md — Billetera v2
-> Última actualización: 2026-10-07 (reset a lo simple: planilla del mes, alquiler, dólar BCRA, Naranja)
+> Última actualización: 2026-10-07 (dashboard por mes con una sola cuenta; transferencias a cuentas propias)
 
 ## Endpoints (Python, `api/*.py` — Vercel Hobby: máx. 12 funciones)
 - `telegram.py` — webhook → `api/bot/dispatcher.py`
 - `cron.py` — diario: dólar BCRA, recordatorios de recurrentes, conceptos pendientes del alquiler
   (mes en curso y próximo), ajuste IPC. `?job=gmail_sync` → lectura de mails
-- `stats.py` — GET `?mes=` (inicio), `?resource=tarjetas|planilla|metricas|categoria_prefs`;
+- `stats.py` — GET `?mes=&resource=mes|proximos|rubros` (pestañas Mes, Próximos meses, En qué gasto), `tarjetas|planilla|metricas|categoria_prefs`;
   PUT `{resource: categoria_prefs|pagar_tarjeta}`
 - `movements.py` — lista/filtros/recategorización
 - `alquiler.py` — GET `?mes=`; POST `{resource: pagar|pagar_mes|descuento}`
@@ -17,6 +17,8 @@
 - `alquiler.py` — contrato, canon por mes, `asegurar_mes`, pagos, descuentos, `aplicar_liquidacion`, `actualizar_ajuste_ipc`
 - `expensas_pdf.py` — lectura de la liquidación (pdfplumber, columnas por posición)
 - `cotizacion.py` — dólar BCRA (A 3500) con caché diaria en `cotizaciones`; fallback dolarapi
+- `mes.py` — resumen del mes de pago (Entra / Sale / Te queda, estado de pago por grupo), próximos meses y gasto por rubro
+- `transferencias.py` — transferencias del Santander: opciones para el bot (lo pendiente más parecido en monto primero, sugerencia por CBU) y aplicación sin duplicar pagos
 - `pagos.py` — pago de resumen de tarjeta y de cuota de préstamo (bot y dashboard)
 - `gmail_sync.py` + `email_parser_santander.py` + `email_parser_naranja.py`
 - `parser.py` — parseo de texto y `KEYWORDS` (orden = prioridad) por id de categoría
@@ -26,11 +28,12 @@
 Dispatcher: PDF → audio → respuestas pendientes (pago tarjeta, recurrente, transferencia, descuento
 de alquiler) → comandos → texto libre (`handlers/movimientos._process_text`).
 Handlers: movimientos, cuotas, recurrentes, tarjetas, prestamos, presupuestos, transferencias,
-alquiler, expensas. Callbacks: `callbacks/movimiento_callbacks.py` (incluye `mon:` para la moneda).
+alquiler, expensas, transferencias (`trf:<id>:<opción>`). Callbacks: `callbacks/movimiento_callbacks.py` (incluye `mon:` para la moneda).
 
 ## Dashboard (`app/dashboard/`)
-Tabs: Inicio, **Planilla del mes** (vista Excel), **Cuotas familia** (detalle por familiar + mensaje para WhatsApp), Detalle mensual (tarjetas, préstamo, alquiler con
-botones de pago, cuotas, recurrentes), Presupuestos, Movimientos, Categorías, Préstamos.
+Tabs: **Mes** (Entra − Sale = Te queda, ya pagado / falta pagar, botones de pago, ingresos editables),
+**Próximos meses**, **En qué gasto** (por rubro vs. mes anterior), **Cuotas familia**, **Movimientos** (lista o
+"como la planilla"), **Ajustes** (préstamos, presupuestos, categorías).
 Todo client-side con `fetchWithAuth` (JWT de Supabase → `lib/auth.py`).
 
 ## Decisiones
