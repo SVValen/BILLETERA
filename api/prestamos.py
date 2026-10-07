@@ -130,6 +130,22 @@ async def prestamos_post(request: Request):
 
     supabase = get_supabase()
 
+    # ── pagar_cuota: marca pagada la cuota del préstamo que cae en `mes` ──────
+    if resource == "pagar_cuota":
+        from lib.pagos import pagar_cuota_prestamo
+        prestamo_id = body.get("prestamo_id")
+        mes = body.get("mes", "")
+        cuota_r = (
+            supabase.table("prestamo_cuotas").select("id")
+            .eq("prestamo_id", prestamo_id).eq("usuario_id", int(telegram_id))
+            .eq("mes_previsto", mes).eq("pagado", False)
+            .order("numero_cuota").limit(1).execute()
+        )
+        if not cuota_r.data:
+            return JSONResponse({"error": "No hay cuota pendiente para ese mes"}, status_code=404)
+        cuota = pagar_cuota_prestamo(telegram_id, cuota_r.data[0]["id"])
+        return JSONResponse({"ok": True, "cuota": cuota})
+
     # ── importar_prestamo ─────────────────────────────────────────────────────
     if resource == "importar_prestamo":
         nombre = body.get("nombre", "Préstamo")
@@ -187,4 +203,4 @@ async def prestamos_post(request: Request):
         supabase.table("prestamo_cuotas").insert(rows).execute()
         return JSONResponse({"ok": True, "prestamo_id": prestamo_id, "cuotas": len(rows)})
 
-    return JSONResponse({"error": "resource requerido: importar_prestamo"}, status_code=400)
+    return JSONResponse({"error": "resource requerido: importar_prestamo|pagar_cuota"}, status_code=400)

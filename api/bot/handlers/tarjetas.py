@@ -368,32 +368,6 @@ async def _nombre_tarjeta(supabase, tarjeta_id: int) -> str:
 async def _registrar_pago_tarjeta(
     supabase, user_id: str, tarjeta_id: int, mes: str, monto_calculado: float, monto_pagado: float,
 ) -> None:
-    """Inserta el movimiento de pago de resumen y actualiza/crea tarjeta_pagos."""
-    nombre = await _nombre_tarjeta(supabase, tarjeta_id)
-
-    cat_r = supabase.table("categorias").select("id").eq("nombre", "Pago Tarjeta").limit(1).execute()
-    cat_id = cat_r.data[0]["id"] if cat_r.data else None
-
-    mov_r = supabase.table("movimientos").insert({
-        "usuario_id": user_id,
-        "fecha": date.today().isoformat(),
-        "descripcion": f"Pago tarjeta {nombre} — resumen {mes_label(mes)}",
-        "monto": monto_pagado,
-        "categoria_id": cat_id,
-        "tipo": "gasto",
-        "origen": "telegram",
-        "estado": "confirmado",
-        "tarjeta_id": tarjeta_id,
-        "es_pago_tarjeta": True,
-    }).execute()
-    movimiento_id = mov_r.data[0]["id"] if mov_r.data else None
-
-    supabase.table("tarjeta_pagos").upsert({
-        "usuario_id": user_id,
-        "tarjeta_id": tarjeta_id,
-        "mes_resumen": mes,
-        "monto_calculado": monto_calculado,
-        "monto_pagado": monto_pagado,
-        "fecha_pago": date.today().isoformat(),
-        "movimiento_id": movimiento_id,
-    }, on_conflict="usuario_id,tarjeta_id,mes_resumen").execute()
+    """Inserta el movimiento de pago de resumen y actualiza/crea tarjeta_pagos (lib/pagos.py)."""
+    from lib.pagos import registrar_pago_tarjeta
+    registrar_pago_tarjeta(user_id, tarjeta_id, mes, monto_calculado, monto_pagado)

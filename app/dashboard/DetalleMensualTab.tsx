@@ -93,6 +93,9 @@ export default function DetalleMensualTab({ mes }: { mes: string }) {
   const [prestamosMes, setPrestamosMes] = useState<PrestamoMes[]>([])
   const [alquiler, setAlquiler] = useState<AlquilerMes | null>(null)
   const [pagandoAlq, setPagandoAlq] = useState<string | null>(null)
+  const [pagando, setPagando] = useState<string | null>(null)
+  const [montoPago, setMontoPago] = useState<Record<number, string>>({})
+  const [reloadKey, setReloadKey] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [expanded, setExpanded] = useState<number | null>(null)
@@ -132,7 +135,7 @@ export default function DetalleMensualTab({ mes }: { mes: string }) {
     }
     load()
     return () => { cancelled = true }
-  }, [mes])
+  }, [mes, reloadKey])
 
   const toggleDetalle = useCallback(async (tarjetaId: number) => {
     if (expanded === tarjetaId) {
@@ -150,6 +153,37 @@ export default function DetalleMensualTab({ mes }: { mes: string }) {
       setLoadingDetalle(null)
     }
   }, [expanded, detalle, mes])
+
+  const pagarTarjeta = async (t: TarjetaResumen) => {
+    const raw = (montoPago[t.tarjeta_id] ?? '').replace(/\./g, '').replace(',', '.').trim()
+    const monto = raw === '' ? t.total : Number(raw)
+    if (!Number.isFinite(monto) || monto <= 0) return
+    setPagando(`tar-${t.tarjeta_id}`)
+    try {
+      await fetchWithAuth('/api/stats', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ resource: 'pagar_tarjeta', tarjeta_id: t.tarjeta_id, mes, monto }),
+      })
+      setReloadKey(k => k + 1)
+    } finally {
+      setPagando(null)
+    }
+  }
+
+  const pagarPrestamo = async (p: PrestamoMes) => {
+    setPagando(`pre-${p.prestamo_id}`)
+    try {
+      await fetchWithAuth('/api/prestamos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ resource: 'pagar_cuota', prestamo_id: p.prestamo_id, mes }),
+      })
+      setReloadKey(k => k + 1)
+    } finally {
+      setPagando(null)
+    }
+  }
 
   const pagarAlquiler = async (body: { resource: 'pagar'; id: number } | { resource: 'pagar_mes'; mes: string }) => {
     setPagandoAlq(body.resource === 'pagar' ? String(body.id) : 'todo')
@@ -267,6 +301,30 @@ export default function DetalleMensualTab({ mes }: { mes: string }) {
                   </div>
                 </button>
 
+                {/* Registrar pago del resumen: el total o el monto que realmente pagaste */}
+                {!t.pagado && t.total > 0 && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0 16px 12px', flexWrap: 'wrap' }}>
+                    <input
+                      inputMode="decimal"
+                      className="month-input"
+                      style={{ width: 140 }}
+                      placeholder={new Intl.NumberFormat('es-AR').format(t.total)}
+                      value={montoPago[t.tarjeta_id] ?? ''}
+                      onChange={e => setMontoPago(prev => ({ ...prev, [t.tarjeta_id]: e.target.value }))}
+                      aria-label={`Monto pagado de ${t.nombre}`}
+                    />
+                    <BilleteraButton size="sm" variant="outline" loading={pagando === `tar-${t.tarjeta_id}`}
+                      onClick={() => pagarTarjeta(t)}>
+                      {(montoPago[t.tarjeta_id] ?? '') === '' ? 'Pagado (total)' : 'Pagado (este monto)'}
+                    </BilleteraButton>
+                  </div>
+                )}
+                {t.pagado && t.monto_pagado != null && Math.abs(t.monto_pagado - t.total) > 1 && (
+                  <p className="muted" style={{ fontSize: 12, margin: '0 16px 12px' }}>
+                    Resumen: {fmt(t.total)} · pagaste {fmt(t.monto_pagado)} ({t.monto_pagado < t.total ? 'quedó ' + fmt(t.total - t.monto_pagado) + ' financiado' : 'pagaste de más'})
+                  </p>
+                )}
+
                 {/* Panel de detalle */}
                 {expanded === t.tarjeta_id && (
                   <div style={{ borderTop: '1px solid var(--border)', padding: '10px 16px 14px' }}>
@@ -324,6 +382,12 @@ export default function DetalleMensualTab({ mes }: { mes: string }) {
                     ? <BilleteraBadge variant="green">✅ Pagada</BilleteraBadge>
                     : <BilleteraBadge variant="gold">⏳ Pendiente</BilleteraBadge>}
                   <span style={{ fontWeight: 700 }}>{fmt(p.monto)}</span>
+                  {!p.pagado && (
+                    <BilleteraButton size="sm" variant="outline" loading={pagando === `pre-${p.prestamo_id}`}
+                      onClick={() => pagarPrestamo(p)}>
+                      Pagado
+                    </BilleteraButton>
+                  )}
                 </div>
               </div>
             ))}

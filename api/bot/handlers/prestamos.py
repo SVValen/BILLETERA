@@ -132,30 +132,11 @@ async def handle_prestamo_callback(
         cuota = cuota_r.data[0]
         prestamo_id = cuota["prestamo_id"]
 
+        from lib.pagos import pagar_cuota_prestamo
         prest_r = supabase.table("prestamos").select("nombre").eq("id", prestamo_id).limit(1).execute()
         prest_nombre = prest_r.data[0]["nombre"] if prest_r.data else "Préstamo"
-        cat_id = _get_auto_cat_id(supabase)
-        monto = cuota.get("monto_ordinario") or cuota["capital"]
-
-        mov_r = supabase.table("movimientos").insert({
-            "usuario_id": user_id,
-            "fecha": date.today().isoformat(),
-            "descripcion": f"{prest_nombre} — cuota {cuota['numero_cuota']}",
-            "monto": monto,
-            "categoria_id": cat_id,
-            "tipo": "gasto",
-            "origen": "telegram",
-            "estado": "confirmado",
-        }).execute()
-        mov_id = mov_r.data[0]["id"] if mov_r.data else None
-
-        supabase.table("prestamo_cuotas").update({
-            "pagado": True,
-            "tipo_pago": "ordinaria",
-            "monto_pagado": monto,
-            "fecha_pago": date.today().isoformat(),
-            "movimiento_id": mov_id,
-        }).eq("id", cuota_id).execute()
+        actualizada = pagar_cuota_prestamo(user_id, cuota_id) or cuota
+        monto = actualizada.get("monto_pagado") or cuota.get("monto_ordinario") or cuota["capital"]
 
         pagadas, total = _cuotas_stats(prestamo_id, supabase)
         pending_r = (

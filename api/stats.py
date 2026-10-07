@@ -24,6 +24,24 @@ async def put_stats(request: Request):
         return err
 
     body = await request.json()
+
+    # ── Pagar el resumen de una tarjeta (monto calculado o el que realmente se pagó) ──
+    if body.get("resource") == "pagar_tarjeta":
+        from lib.pagos import registrar_pago_tarjeta, total_resumen_tarjeta
+        mes = body.get("mes", "")
+        if not validate_mes(mes) or not body.get("tarjeta_id"):
+            return JSONResponse({"error": "Faltan tarjeta_id/mes"}, status_code=400)
+        tarjeta_id = int(body["tarjeta_id"])
+        calculado = total_resumen_tarjeta(telegram_id, tarjeta_id, mes)
+        try:
+            pagado = float(body.get("monto")) if body.get("monto") not in (None, "") else calculado
+        except (TypeError, ValueError):
+            return JSONResponse({"error": "monto inválido"}, status_code=400)
+        if pagado <= 0:
+            return JSONResponse({"error": "monto inválido"}, status_code=400)
+        registrar_pago_tarjeta(telegram_id, tarjeta_id, mes, calculado, pagado)
+        return JSONResponse({"ok": True, "monto_calculado": calculado, "monto_pagado": pagado})
+
     if body.get("resource") != "categoria_prefs":
         return JSONResponse({"error": "resource inválido"}, status_code=400)
 
