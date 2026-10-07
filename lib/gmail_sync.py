@@ -21,7 +21,7 @@ from datetime import date, datetime, timedelta, timezone
 from email.header import decode_header
 
 from lib.supabase_client import get_supabase
-from lib.tarjetas import calcular_mes_resumen
+from lib.tarjetas import calcular_mes_resumen, mes_resumen_tarjeta
 from lib.email_parser_santander import (
     identificar_tipo_email, parse_email,
     TIPO_DEBITO_AUTOMATICO, TIPO_PAGO_1_PAGO, TIPO_PAGO_CUOTAS, TIPO_PAGO_DEBITO, TIPO_TRANSFERENCIA,
@@ -170,7 +170,7 @@ async def _procesar_parsed(usuario_id: str, tipo: str, parsed: dict, token: str)
         hoy = date.fromisoformat(parsed["fecha"])
         tar_r = supabase.table("tarjetas").select("dia_cierre").eq("id", tarjeta_id).single().execute()
         dia_cierre = tar_r.data["dia_cierre"] if tar_r.data else None
-        mes_resumen = calcular_mes_resumen(hoy, dia_cierre) if dia_cierre else hoy.strftime("%Y-%m")
+        mes_resumen = mes_resumen_tarjeta(tarjeta_id, hoy, dia_cierre)
         categoria_id = await _categorize(parsed["descripcion"], usuario_id)
 
         # Compras / débitos automáticos en dólares (ej. "Monto U$S 20,00"):

@@ -371,3 +371,65 @@ async def _registrar_pago_tarjeta(
     """Inserta el movimiento de pago de resumen y actualiza/crea tarjeta_pagos (lib/pagos.py)."""
     from lib.pagos import registrar_pago_tarjeta
     registrar_pago_tarjeta(user_id, tarjeta_id, mes, monto_calculado, monto_pagado)
+
+
+
+# ── Cierre variable: /cierre y botones que manda el cron ──────────────────────
+
+def teclado_cierre(tarjeta_id: int, mes_resumen: str) -> dict:
+    from lib.tarjetas import opciones_cierre
+    fechas = opciones_cierre(mes_resumen)
+    fila1 = [{"text": f.strftime("%d/%m"), "callback_data": f"cierre:{tarjeta_id}:{mes_resumen}:{f.isoformat()}"} for f in fechas[:4]]
+    fila2 = [{"text": f.strftime("%d/%m"), "callback_data": f"cierre:{tarjeta_id}:{mes_resumen}:{f.isoformat()}"} for f in fechas[4:]]
+    return {"inline_keyboard": [fila1, fila2]}
+
+
+async def handle_cierre_cmd(text: str, user_id: str, chat_id: int, token: str) -> None:
+    """/cierre santander 30/10 → guarda el cierre real. Sin argumentos, muestra botones."""
+    import re as _re
+    from datetime import date as _date
+    from lib.tarjetas import registrar_cierre, mes_siguiente
+    tarjetas = get_tarjetas_activas(user_id)
+    m = _re.match(r"^/cierre\s+(\w+)\s+(\d{1,2})/(\d{1,2})(?:/(\d{2,4}))?", text.strip(), _re.IGNORECASE)
+    if not m:
+        if not tarjetas:
+            await _send(chat_id, "No tenés tarjetas configuradas.", token, parse_mode="")
+            return
+        mes_pago = mes_siguiente(_date.today().strftime("%Y-%m"))
+        for t in tarjetas:
+            await _send(chat_id, f"📅 ¿Cuándo cierra *{t['nombre']}* el resumen que pagás en {mes_label(mes_pago)}?",
+                        token, reply_markup=teclado_cierre(t["id"], mes_pago))
+        return
+    nombre, dd, mm, yy = m.group(1).lower(), int(m.group(2)), int(m.group(3)), m.group(4)
+    tarjeta = next((t for t in tarjetas if t["nombre"].lower().startswith(nombre)), None)
+    if not tarjeta:
+        await _send(chat_id, f"No encontré la tarjeta \"{m.group(1)}\".", token, parse_mode="")
+        return
+    hoy = _date.today()
+    anio = int(yy) + (2000 if yy and len(yy) == 2 else 0) if yy else hoy.year
+    try:
+        fecha = _date(anio, mm, dd)
+    except ValueError:
+        await _send(chat_id, "Fecha inválida. Ej: `/cierre santander 30/10`", token)
+        return
+    # El resumen que cierra el 29/10 o el 2/11 se paga en noviembre
+    mes_pago = mes_siguiente(fecha.strftime("%Y-%m")) if fecha.day >= 15 else fecha.strftime("%Y-%m")
+    n = registrar_cierre(tarjeta["id"], mes_pago, fecha)
+    await _send(chat_id, f"✅ *{tarjeta['nombre']}* cierra el {fecha.strftime('%d/%m')} (resumen de {mes_label(mes_pago)})."
+                + (f" Reubiqué {n} compra{'s' if n != 1 else ''}." if n else ""), token)
+
+
+async def handle_cierre_callback(parts: list[str], callback_id: str, chat_id: int,
+                                 message_id: int, user_id: str, token: str) -> bool:
+    if parts[0] != "cierre" or len(parts) != 4:
+        return False
+    from datetime import date as _date
+    from lib.tarjetas import registrar_cierre
+    tarjeta_id, mes_pago, fecha = int(parts[1]), parts[2], _date.fromisoformat(parts[3])
+    n = registrar_cierre(tarjeta_id, mes_pago, fecha)
+    nombre = await _nombre_tarjeta(get_supabase(), tarjeta_id)
+    await _answer_callback(callback_id, token, "Listo ✅")
+    await _edit_message(chat_id, message_id,
+        f"✅ *{nombre}* cierra el {fecha.strftime('%d/%m')} (resumen de {mes_label(mes_pago)})."
+        + (f" Reubiqué {n} compra{'s' if n != 1 else ''}." if n else ""), token)
+    return True

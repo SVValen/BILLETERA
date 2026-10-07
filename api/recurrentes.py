@@ -39,6 +39,24 @@ async def get_recurrentes_proximos(request: Request):
             return JSONResponse({"error": "Formato de mes inválido (YYYY-MM)"}, status_code=400)
 
         supabase = get_supabase()
+        # v2: los ingresos del mes son los movimientos con mes_resumen = mes (como la planilla),
+        # más los ingresos recurrentes que todavía no se registraron.
+        movs_r = (
+            supabase.table("movimientos")
+            .select("id, descripcion, monto")
+            .eq("usuario_id", telegram_id)
+            .eq("tipo", "ingreso")
+            .eq("mes_resumen", mes)
+            .neq("estado", "anulado")
+            .order("monto", desc=True)
+            .execute()
+        )
+        result = [
+            {"id": m["id"], "descripcion": m["descripcion"], "monto_esperado": float(m["monto"]),
+             "monto_registrado": float(m["monto"]), "registrado": True}
+            for m in (movs_r.data or [])
+        ]
+        vistos = {r["descripcion"].lower() for r in result}
         recs_r = (
             supabase.table("recurrentes")
             .select("id, descripcion, monto")
@@ -47,35 +65,10 @@ async def get_recurrentes_proximos(request: Request):
             .eq("activo", True)
             .execute()
         )
-        recs = recs_r.data or []
-        if not recs:
-            return JSONResponse([])
-
-        start, end = mes_rango(mes)
-        movs_r = (
-            supabase.table("movimientos")
-            .select("descripcion, monto")
-            .eq("usuario_id", telegram_id)
-            .eq("tipo", "ingreso")
-            .neq("estado", "anulado")
-            .gte("fecha", start)
-            .lt("fecha", end)
-            .execute()
-        )
-        registrados: dict[str, float] = {}
-        for m in (movs_r.data or []):
-            registrados[m["descripcion"]] = registrados.get(m["descripcion"], 0) + m["monto"]
-
-        result = [
-            {
-                "id": r["id"],
-                "descripcion": r["descripcion"],
-                "monto_esperado": r["monto"],
-                "monto_registrado": registrados.get(r["descripcion"]),
-                "registrado": r["descripcion"] in registrados,
-            }
-            for r in recs
-        ]
+        for r in (recs_r.data or []):
+            if r["descripcion"].lower() not in vistos:
+                result.append({"id": -r["id"], "descripcion": r["descripcion"], "monto_esperado": float(r["monto"]),
+                               "monto_registrado": None, "registrado": False})
         return JSONResponse(result)
 
     try:

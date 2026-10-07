@@ -68,6 +68,27 @@ async def _procesar_recurrentes(hoy: date, token: str) -> int:
     return enviados
 
 
+async def _preguntar_cierres(hoy: date, token: str) -> int:
+    """Desde el 25, pregunta la fecha de cierre de las tarjetas que cierran en días variables."""
+    from lib.tarjetas import cierres_a_preguntar, marcar_preguntado, mes_label
+    from api.bot.handlers.tarjetas import teclado_cierre
+    enviados = 0
+    for t in cierres_a_preguntar(hoy):
+        try:
+            await _send_telegram(
+                int(t["usuario_id"]),
+                f"📅 ¿Cuándo cierra *{t['nombre']}* el resumen que pagás en {mes_label(t['mes_resumen'])}?\n"
+                "_Con eso ubico bien cada compra en su resumen. También podés escribir `/cierre "
+                f"{t['nombre'].lower()} 30/10`._",
+                token, reply_markup=teclado_cierre(t["id"], t["mes_resumen"]),
+            )
+            marcar_preguntado(t["id"], t["mes_resumen"])
+            enviados += 1
+        except Exception:
+            pass
+    return enviados
+
+
 async def _ajustes_ipc(token: str) -> int:
     """Calcula el ajuste por IPC del alquiler cuando ya están los datos, y avisa."""
     from lib import alquiler as alq
@@ -126,6 +147,7 @@ async def cron_job(request: Request, job: str = ""):
     rec_enviados = await _procesar_recurrentes(hoy, token)
     alquiler_creados = _asegurar_alquileres(hoy)
     ajustes = await _ajustes_ipc(token)
+    cierres = await _preguntar_cierres(hoy, token)
 
     return JSONResponse({
         "ok": True,
@@ -134,4 +156,5 @@ async def cron_job(request: Request, job: str = ""):
         "alquiler_conceptos_creados": alquiler_creados,
         "dolar_bcra": dolar_bcra,
         "ajustes_ipc": ajustes,
+        "cierres_preguntados": cierres,
     })

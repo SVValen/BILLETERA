@@ -10,6 +10,7 @@ from .handlers.presupuestos import _handle_presupuesto_cmd
 from .handlers.tarjetas import (
     handle_tarjeta_nueva_cmd, handle_tarjetas_cmd, handle_tarjeta_callback,
     handle_pagar_tarjeta_cmd, handle_pagar_tarjeta_callback, handle_pagar_tarjeta_text,
+    handle_cierre_cmd, handle_cierre_callback,
 )
 from .handlers.recurrentes import handle_recurrente_text
 from .handlers.transferencias import handle_transferencia_text
@@ -36,6 +37,8 @@ async def dispatch_callback(cq: dict, token: str) -> None:
     if await handle_prestamo_callback(parts, callback_id, chat_id, message_id, user_id, supabase, token):
         return
     if await handle_alquiler_callback(parts, callback_id, chat_id, message_id, user_id, token):
+        return
+    if await handle_cierre_callback(parts, callback_id, chat_id, message_id, user_id, token):
         return
 
 
@@ -178,6 +181,11 @@ async def dispatch_message(message: dict, token: str) -> None:
         if token:
             args = text[len("/presupuesto"):].strip()
             await _handle_presupuesto_cmd(user_id, chat_id, args, token)
+        return
+
+    if text.lower().startswith("/cierre"):
+        if token:
+            await handle_cierre_cmd(text, user_id, chat_id, token)
         return
 
     if text.lower().startswith("/alquiler"):

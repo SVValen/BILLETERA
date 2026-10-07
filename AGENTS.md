@@ -27,7 +27,7 @@ semanal). La base anterior quedó copiada en el esquema `backup_v1` de Supabase.
   - Trigger `movimientos_set_grupo`: con tarjeta → 'Tarjeta <nombre>'; con préstamo → 'Préstamo'
   - Montos negativos solo en grupo 'Alquiler' (descuentos por arreglos)
 - `categorias`: rubros del Excel. IDs fijos que usa el código: 7 Otros, 17 Ingresos, 20 Pago Tarjeta, 10 Departamento
-- `tarjetas` (dia_cierre: Naranja 27, MP 5; Santander/BBVA variables, hoy 28), `tarjeta_last4_map`, `tarjeta_pagos`
+- `tarjetas` (dia_cierre: Naranja 27, MP 5; Santander/BBVA `cierre_variable`), `tarjeta_cierres` (fecha real de cierre por resumen; el cron pregunta desde el 25), `tarjeta_last4_map`, `tarjeta_pagos`
 - `cuotas_plan`, `prestamos` + `prestamo_cuotas` (cronograma importado completo)
 - `alquiler_contrato` + `alquiler_canon` (canon por período, estimado hasta tener IPC)
 - `cotizaciones` (dólar mayorista BCRA A 3500 por día)
@@ -56,6 +56,7 @@ semanal). La base anterior quedó copiada en el esquema `backup_v1` de Supabase.
 | `descuento 28500 ducha` | Descuento del alquiler del mes |
 | PDF de expensas | Lee la fila del inquilino y carga expensas/agua/gas |
 | `/tarjetas`, `/tarjeta_nueva`, `/pagar_tarjeta` | Tarjetas y pago de resumen |
+| `/cierre santander 30/10` | Fecha real de cierre (tarjetas de cierre variable) |
 | `/prestamos` | Cuotas de préstamo |
 | `/presupuesto`, `/recurrentes`, `/editar`, `/borrar`, `/id`, `/ayuda` | Utilidades |
 

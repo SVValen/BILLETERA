@@ -33,7 +33,7 @@ interface Planilla {
 }
 
 // Orden de los grupos, igual que en la planilla de Excel
-const ORDEN_INGRESOS = ['Sueldo', 'Cuotas familia']
+const ORDEN_INGRESOS = ['Sueldo', 'Cuotas familia', 'Otros ingresos']
 const ORDEN_GASTOS = ['Préstamo', 'Tarjeta Naranja', 'Tarjeta Santander', 'Tarjeta BBVA', 'Tarjeta MP', 'Alquiler', 'Efectivo']
 
 const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre']

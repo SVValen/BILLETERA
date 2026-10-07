@@ -96,6 +96,8 @@ export default function DetalleMensualTab({ mes }: { mes: string }) {
   const [pagando, setPagando] = useState<string | null>(null)
   const [montoPago, setMontoPago] = useState<Record<number, string>>({})
   const [reloadKey, setReloadKey] = useState(0)
+  const [editIngreso, setEditIngreso] = useState<{ id: number; monto: string } | null>(null)
+  const [nuevoIngreso, setNuevoIngreso] = useState<{ descripcion: string; monto: string; grupo: string } | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [expanded, setExpanded] = useState<number | null>(null)
@@ -153,6 +155,49 @@ export default function DetalleMensualTab({ mes }: { mes: string }) {
       setLoadingDetalle(null)
     }
   }, [expanded, detalle, mes])
+
+  const parseMonto = (raw: string) => {
+    const t = raw.trim()
+    // '1.522.876' / '1522876' / '1.522.876,50' / '1522876.5'
+    const n = t.includes(',') ? Number(t.replace(/\./g, '').replace(',', '.')) : Number(/\.\d{3}(\.|$)/.test(t) ? t.replace(/\./g, '') : t)
+    return Number.isFinite(n) && n > 0 ? n : null
+  }
+
+  const guardarIngreso = async () => {
+    if (!editIngreso) return
+    const monto = parseMonto(editIngreso.monto)
+    if (monto == null) return
+    setPagando(`ing-${editIngreso.id}`)
+    try {
+      await fetchWithAuth(`/api/movements?id=${editIngreso.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ monto }),
+      })
+      setEditIngreso(null)
+      setReloadKey(k => k + 1)
+    } finally {
+      setPagando(null)
+    }
+  }
+
+  const agregarIngreso = async () => {
+    if (!nuevoIngreso) return
+    const monto = parseMonto(nuevoIngreso.monto)
+    if (monto == null || !nuevoIngreso.descripcion.trim()) return
+    setPagando('ing-nuevo')
+    try {
+      await fetchWithAuth('/api/movements', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tipo: 'ingreso', descripcion: nuevoIngreso.descripcion, monto, mes, grupo: nuevoIngreso.grupo }),
+      })
+      setNuevoIngreso(null)
+      setReloadKey(k => k + 1)
+    } finally {
+      setPagando(null)
+    }
+  }
 
   const pagarTarjeta = async (t: TarjetaResumen) => {
     const raw = (montoPago[t.tarjeta_id] ?? '').replace(/\./g, '').replace(',', '.').trim()
@@ -216,31 +261,71 @@ export default function DetalleMensualTab({ mes }: { mes: string }) {
 
   return (
     <>
-      {/* Ingresos esperados del mes */}
-      {ingresosMes.length > 0 && (
-        <div className="widget-box">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18, flexWrap: 'wrap', gap: 8 }}>
-            <h3 className="widget-title" style={{ margin: 0 }}>💰 Ingresos — {mes}</h3>
-            <div style={{ textAlign: 'right' }}>
-              <div style={{ fontSize: 11, color: 'var(--fg3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.5px' }}>Total</div>
-              <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--b-green)', letterSpacing: '-0.3px' }}>{fmt(totalIngresosMes)}</div>
-            </div>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {ingresosMes.map(i => (
-              <div key={i.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 14 }}>
-                <span>{i.descripcion}</span>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  {i.registrado
-                    ? <BilleteraBadge variant="green">✅ Registrado</BilleteraBadge>
-                    : <BilleteraBadge variant="gold">⏳ Esperado</BilleteraBadge>}
-                  <span style={{ fontWeight: 700 }}>{fmt(i.monto_registrado ?? i.monto_esperado)}</span>
-                </div>
-              </div>
-            ))}
-          </div>
+      {/* Ingresos del mes: editables y con alta manual (aguinaldo, extras, etc.) */}
+      <div className="widget-box">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18, flexWrap: 'wrap', gap: 8 }}>
+          <h3 className="widget-title" style={{ margin: 0 }}>💰 Ingresos — {mes}</h3>
+          <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--b-green)', letterSpacing: '-0.3px' }}>{fmt(totalIngresosMes)}</div>
         </div>
-      )}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {ingresosMes.length === 0 && <p className="muted" style={{ margin: 0, fontSize: 13 }}>Sin ingresos cargados este mes.</p>}
+          {ingresosMes.map(i => (
+            <div key={i.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, fontSize: 14, flexWrap: 'wrap' }}>
+              <span>{i.descripcion}</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                {!i.registrado && <BilleteraBadge variant="gold">⏳ Esperado</BilleteraBadge>}
+                {editIngreso?.id === i.id ? (
+                  <>
+                    <input
+                      inputMode="decimal"
+                      className="month-input"
+                      style={{ width: 130 }}
+                      value={editIngreso.monto}
+                      autoFocus
+                      onChange={e => setEditIngreso({ id: i.id, monto: e.target.value })}
+                      onKeyDown={e => { if (e.key === 'Enter') guardarIngreso(); if (e.key === 'Escape') setEditIngreso(null) }}
+                      aria-label={`Monto de ${i.descripcion}`}
+                    />
+                    <BilleteraButton size="sm" variant="primary" loading={pagando === `ing-${i.id}`} onClick={guardarIngreso}>Guardar</BilleteraButton>
+                    <BilleteraButton size="sm" variant="ghost" onClick={() => setEditIngreso(null)}>Cancelar</BilleteraButton>
+                  </>
+                ) : (
+                  <>
+                    <span style={{ fontWeight: 700 }}>{fmt(i.monto_registrado ?? i.monto_esperado)}</span>
+                    {i.registrado && (
+                      <BilleteraButton size="sm" variant="outline"
+                        onClick={() => setEditIngreso({ id: i.id, monto: String(i.monto_registrado ?? i.monto_esperado) })}>
+                        Editar
+                      </BilleteraButton>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+        {nuevoIngreso ? (
+          <div style={{ display: 'flex', gap: 8, marginTop: 14, flexWrap: 'wrap', alignItems: 'center' }}>
+            <input className="month-input" style={{ flex: '1 1 160px' }} placeholder="Descripción (ej. Aguinaldo Unitech)"
+              value={nuevoIngreso.descripcion} onChange={e => setNuevoIngreso({ ...nuevoIngreso, descripcion: e.target.value })} aria-label="Descripción del ingreso" />
+            <input className="month-input" style={{ width: 130 }} inputMode="decimal" placeholder="Monto"
+              value={nuevoIngreso.monto} onChange={e => setNuevoIngreso({ ...nuevoIngreso, monto: e.target.value })} aria-label="Monto del ingreso" />
+            <select className="month-input" value={nuevoIngreso.grupo} onChange={e => setNuevoIngreso({ ...nuevoIngreso, grupo: e.target.value })} aria-label="Grupo">
+              <option>Sueldo</option>
+              <option>Cuotas familia</option>
+              <option>Otros ingresos</option>
+            </select>
+            <BilleteraButton size="sm" variant="primary" loading={pagando === 'ing-nuevo'} onClick={agregarIngreso}>Agregar</BilleteraButton>
+            <BilleteraButton size="sm" variant="ghost" onClick={() => setNuevoIngreso(null)}>Cancelar</BilleteraButton>
+          </div>
+        ) : (
+          <div style={{ marginTop: 14 }}>
+            <BilleteraButton size="sm" variant="ghost" onClick={() => setNuevoIngreso({ descripcion: '', monto: '', grupo: 'Sueldo' })}>
+              + Agregar ingreso
+            </BilleteraButton>
+          </div>
+        )}
+      </div>
 
       {/* Resumen por tarjeta del mes */}
       {tarjetas.length > 0 && (

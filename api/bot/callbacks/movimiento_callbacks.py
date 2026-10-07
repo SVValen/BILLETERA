@@ -3,7 +3,7 @@ from datetime import date
 from lib.supabase_client import get_supabase
 from lib.parser import categorize_from_keywords
 from lib.date_utils import add_months
-from lib.tarjetas import calcular_mes_resumen
+from lib.tarjetas import calcular_mes_resumen, mes_resumen_tarjeta
 from ..tg import _send, _answer_callback, _edit_message
 from ..keyboards import _category_keyboard, _edit_submenu_keyboard, _del_confirm_keyboard, _monto_keyboard, _cuota_fecha_keyboard, _cuotas_pago_keyboard
 from ..helpers import _save_learned_keywords
@@ -77,7 +77,7 @@ async def handle_movimiento_callback(
             if tar_r.data:
                 dia_cierre = tar_r.data["dia_cierre"]
                 updates["tarjeta_id"] = tarjeta_id
-                updates["mes_resumen"] = calcular_mes_resumen(hoy, dia_cierre)
+                updates["mes_resumen"] = mes_resumen_tarjeta(tarjeta_id, hoy, dia_cierre)
             supabase.table("movimientos").update(updates).eq("id", mov_id).execute()
             monto = mov["monto"]
             if token:

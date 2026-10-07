@@ -177,6 +177,7 @@ export default function InicioTab({ mes }: { mes: string }) {
                     outerRadius={90}
                     paddingAngle={2}
                     label={false}
+                    isAnimationActive={false}
                   >
                     {pieData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
                   </Pie>

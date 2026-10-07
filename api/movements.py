@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse
 from lib.supabase_client import get_supabase
 from lib.auth import get_telegram_id_from_request
 from lib.date_utils import mes_rango, validate_mes
-from lib.tarjetas import calcular_mes_resumen
+from lib.tarjetas import calcular_mes_resumen, mes_resumen_tarjeta
 from api.bot.helpers import _save_learned_keywords
 
 app = FastAPI()
@@ -159,6 +159,34 @@ async def get_movements(request: Request):
     })
 
 
+@app.post("/api/movements")
+async def post_movement(request: Request):
+    """Alta manual desde el dashboard. Por ahora solo ingresos:
+    {tipo: 'ingreso', descripcion, monto, mes: 'YYYY-MM', grupo: 'Sueldo'|'Cuotas familia'|'Otros ingresos'}"""
+    from lib.date_utils import validate_mes
+    telegram_id, err = await get_telegram_id_from_request(request)
+    if err:
+        return err
+    body = await request.json()
+    if body.get("tipo") != "ingreso":
+        return JSONResponse({"error": "Solo se pueden agregar ingresos desde acá"}, status_code=400)
+    mes = body.get("mes", "")
+    descripcion = (body.get("descripcion") or "").strip()
+    try:
+        monto = float(body.get("monto"))
+    except (TypeError, ValueError):
+        return JSONResponse({"error": "monto inválido"}, status_code=400)
+    if not validate_mes(mes) or not descripcion or monto <= 0:
+        return JSONResponse({"error": "Faltan descripción, monto o mes"}, status_code=400)
+    grupo = body.get("grupo") if body.get("grupo") in ("Sueldo", "Cuotas familia", "Otros ingresos") else "Otros ingresos"
+    r = get_supabase().table("movimientos").insert({
+        "usuario_id": telegram_id, "fecha": f"{mes}-01", "descripcion": descripcion[:200],
+        "monto": round(monto, 2), "categoria_id": 17, "tipo": "ingreso", "origen": "dashboard",
+        "estado": "confirmado", "mes_resumen": mes, "grupo": grupo,
+    }).execute()
+    return JSONResponse({"ok": True, "data": r.data[0] if r.data else None})
+
+
 @app.patch("/api/movements")
 async def patch_movement(request: Request):
     telegram_id, err = await get_telegram_id_from_request(request)
@@ -189,7 +217,8 @@ async def patch_movement(request: Request):
 
         tarjeta_id = body.get("tarjeta_id")
         if tarjeta_id is None:
-            updates = {"tarjeta_id": None, "mes_resumen": None}
+            fecha_ref = mov.get("fecha_compra") or mov.get("fecha")
+            updates = {"tarjeta_id": None, "mes_resumen": fecha_ref[:7], "grupo": "Efectivo"}
         else:
             tid = int(tarjeta_id)
             tar_r = (
@@ -204,7 +233,7 @@ async def patch_movement(request: Request):
                 return JSONResponse({"error": "Tarjeta no encontrada"}, status_code=404)
             dia_cierre = tar_r.data.get("dia_cierre")
             fecha_ref = mov.get("fecha_compra") or mov.get("fecha")
-            mes_resumen = calcular_mes_resumen(date.fromisoformat(fecha_ref), dia_cierre) if dia_cierre else None
+            mes_resumen = mes_resumen_tarjeta(tid, date.fromisoformat(fecha_ref), dia_cierre)
             updates = {"tarjeta_id": tid, "mes_resumen": mes_resumen}
 
         r = (
@@ -213,6 +242,27 @@ async def patch_movement(request: Request):
             .eq("id", int(id_))
             .eq("usuario_id", telegram_id)
             .execute()
+        )
+        if not r.data:
+            return JSONResponse({"error": "Movimiento no encontrado"}, status_code=404)
+        return JSONResponse({"ok": True, "data": r.data[0]})
+
+    # ── Editar monto / descripción (p. ej. ingresos desde el dashboard) ──
+    if "monto" in body or "descripcion" in body:
+        updates: dict = {}
+        if "monto" in body:
+            try:
+                monto = float(body["monto"])
+            except (TypeError, ValueError):
+                return JSONResponse({"error": "monto inválido"}, status_code=400)
+            if monto <= 0:
+                return JSONResponse({"error": "El monto tiene que ser mayor a cero"}, status_code=400)
+            updates.update({"monto": round(monto, 2), "estimado": False})
+        if body.get("descripcion"):
+            updates["descripcion"] = str(body["descripcion"]).strip()[:200]
+        r = (
+            supabase.table("movimientos").update(updates)
+            .eq("id", int(id_)).eq("usuario_id", telegram_id).execute()
         )
         if not r.data:
             return JSONResponse({"error": "Movimiento no encontrado"}, status_code=404)
