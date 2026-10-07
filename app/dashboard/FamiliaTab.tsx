@@ -5,8 +5,9 @@ import { fetchWithAuth } from '@/lib/fetch-with-auth'
 import { BilleteraAlert, BilleteraButton } from '@/app/components/design'
 
 interface Item {
-  asignacion_id: number
-  movimiento_id: number
+  manual_id?: number
+  asignacion_id: number | null
+  movimiento_id: number | null
   descripcion: string
   cuota_nro: number | null
   cuota_total: number | null
@@ -78,6 +79,7 @@ export default function FamiliaTab({ mes }: { mes: string }) {
   const [verTodas, setVerTodas] = useState(false)
   const [telefonos, setTelefonos] = useState<Record<number, string>>({})
   const [nuevo, setNuevo] = useState({ nombre: '', telefono: '' })
+  const [manual, setManual] = useState<Record<number, { descripcion: string; monto: string; cuota: string; total: string } | null>>({})
 
   useEffect(() => {
     let cancelled = false
@@ -147,7 +149,7 @@ export default function FamiliaTab({ mes }: { mes: string }) {
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 14 }}>
               {f.items.map(i => (
-                <div key={`${i.asignacion_id}-${i.movimiento_id}`} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, fontSize: 14, flexWrap: 'wrap' }}>
+                <div key={i.manual_id ? `m-${i.manual_id}` : `${i.asignacion_id}-${i.movimiento_id}`} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, fontSize: 14, flexWrap: 'wrap' }}>
                   <span>
                     {i.descripcion}
                     {i.cuota_nro && i.cuota_total && i.cuota_total > 1 && <span className="muted"> {i.cuota_nro}/{i.cuota_total}</span>}
@@ -155,8 +157,11 @@ export default function FamiliaTab({ mes }: { mes: string }) {
                   </span>
                   <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <strong>{fmt(i.monto)}</strong>
-                    <BilleteraButton size="sm" variant="ghost" loading={ocupado === `des-${i.asignacion_id}`}
-                      onClick={() => post(`des-${i.asignacion_id}`, { resource: 'desasignar', id: i.asignacion_id })}>
+                    <BilleteraButton size="sm" variant="ghost"
+                      loading={ocupado === (i.manual_id ? `man-${i.manual_id}` : `des-${i.asignacion_id}`)}
+                      onClick={() => i.manual_id
+                        ? post(`man-${i.manual_id}`, { resource: 'manual_borrar', id: i.manual_id })
+                        : post(`des-${i.asignacion_id}`, { resource: 'desasignar', id: i.asignacion_id })}>
                       Quitar
                     </BilleteraButton>
                   </span>
@@ -181,6 +186,50 @@ export default function FamiliaTab({ mes }: { mes: string }) {
                 </a>
               </div>
             </>
+          )}
+
+          {/* Entrada a mano: solo para este panel, no toca la planilla */}
+          {manual[f.id] ? (
+            <div style={{ display: 'flex', gap: 8, marginTop: 14, alignItems: 'center', flexWrap: 'wrap' }}>
+              <input className="month-input" style={{ flex: '1 1 160px' }} placeholder="Qué es (ej. Compras agrupadas)"
+                value={manual[f.id]!.descripcion}
+                onChange={e => setManual(prev => ({ ...prev, [f.id]: { ...prev[f.id]!, descripcion: e.target.value } }))}
+                aria-label="Descripción" />
+              <input className="month-input" style={{ width: 120 }} inputMode="decimal" placeholder="Por mes"
+                value={manual[f.id]!.monto}
+                onChange={e => setManual(prev => ({ ...prev, [f.id]: { ...prev[f.id]!, monto: e.target.value } }))}
+                aria-label="Monto por mes" />
+              <span style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 4 }}>
+                cuota
+                <input className="month-input" style={{ width: 52 }} inputMode="numeric" value={manual[f.id]!.cuota}
+                  onChange={e => setManual(prev => ({ ...prev, [f.id]: { ...prev[f.id]!, cuota: e.target.value } }))}
+                  aria-label="Cuota de este mes" />
+                de
+                <input className="month-input" style={{ width: 52 }} inputMode="numeric" value={manual[f.id]!.total}
+                  onChange={e => setManual(prev => ({ ...prev, [f.id]: { ...prev[f.id]!, total: e.target.value } }))}
+                  aria-label="Cantidad de cuotas" />
+              </span>
+              <BilleteraButton size="sm" variant="primary" loading={ocupado === `nm-${f.id}`}
+                onClick={async () => {
+                  const m = manual[f.id]!
+                  const monto = Number(m.monto.includes(',') ? m.monto.replace(/\./g, '').replace(',', '.') : m.monto.replace(/\.(?=\d{3}(\D|$))/g, ''))
+                  await post(`nm-${f.id}`, {
+                    resource: 'manual', familiar_id: f.id, mes, descripcion: m.descripcion, monto,
+                    cuota_actual: Number(m.cuota || 1), num_cuotas: Number(m.total || 1),
+                  })
+                  setManual(prev => ({ ...prev, [f.id]: null }))
+                }}>
+                Agregar
+              </BilleteraButton>
+              <BilleteraButton size="sm" variant="ghost" onClick={() => setManual(prev => ({ ...prev, [f.id]: null }))}>Cancelar</BilleteraButton>
+            </div>
+          ) : (
+            <div style={{ marginTop: 14 }}>
+              <BilleteraButton size="sm" variant="ghost"
+                onClick={() => setManual(prev => ({ ...prev, [f.id]: { descripcion: '', monto: '', cuota: '1', total: '1' } }))}>
+                + Agregar a mano
+              </BilleteraButton>
+            </div>
           )}
 
           <div style={{ display: 'flex', gap: 8, marginTop: 14, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -245,6 +294,7 @@ export default function FamiliaTab({ mes }: { mes: string }) {
         )}
         <p className="muted" style={{ fontSize: 12, margin: '12px 0 0' }}>
           Si es una compra en cuotas, se asigna el plan completo: le aparece todos los meses hasta la última cuota.
+          Lo que agregues a mano (por ejemplo, compras agrupadas) solo se ve en este panel y sigue las cuotas que indiques.
         </p>
       </div>
 

@@ -10,7 +10,7 @@
 - `movements.py` — lista/filtros/recategorización
 - `alquiler.py` — GET `?mes=`; POST `{resource: pagar|pagar_mes|descuento}`
 - `prestamos.py` — GET `?resource=prestamos|prestamos_mes|prestamo_cuotas`; POST `{resource: importar_prestamo|pagar_cuota}`
-- `familia.py` — GET `?mes=` (lo que debe cada familiar + compras sin asignar); POST `{resource: familiar|asignar|desasignar}`
+- `familia.py` — GET `?mes=` (lo que debe cada familiar + compras sin asignar); POST `{resource: familiar|asignar|desasignar|manual|manual_borrar}`
 - `cuotas.py`, `recurrentes.py`, `presupuestos.py` (también categorías)
 
 ## Librerías (`lib/`)
