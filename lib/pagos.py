@@ -130,3 +130,78 @@ def pagar_cuota_prestamo(usuario_id: str, cuota_id: int) -> dict | None:
         "movimiento_id": mov_id,
     }).eq("id", cuota_id).execute()
     return upd.data[0] if upd.data else cuota
+
+
+def cancelar_prestamo(usuario_id: str, prestamo_id: int, mes: str, monto: float, pagado: bool = False) -> dict | None:
+    """Cancelación anticipada: en `mes` se paga `monto` y con eso se saldan la cuota de ese mes
+    y todas las siguientes (adelanto de cuotas).
+
+    - La cuota del mes (o la primera pendiente desde ese mes) queda con un único movimiento por
+      el monto total de la cancelación, en el grupo Préstamo de ese mes.
+    - Las cuotas posteriores quedan pagadas como 'adelanto' apuntando a ese mismo movimiento,
+      y sus movimientos (si los había) se anulan: ya no aparecen en los meses siguientes.
+    """
+    sb = get_supabase()
+    prest = (
+        sb.table("prestamos").select("id, nombre, total_cuotas")
+        .eq("id", prestamo_id).eq("usuario_id", int(usuario_id)).limit(1).execute()
+    ).data
+    if not prest:
+        return None
+    prest = prest[0]
+    cuotas = (
+        sb.table("prestamo_cuotas").select("id, numero_cuota, mes_previsto, pagado, movimiento_id")
+        .eq("prestamo_id", prestamo_id).gte("mes_previsto", mes).eq("pagado", False)
+        .order("numero_cuota").execute()
+    ).data or []
+    if not cuotas:
+        return None
+    primera, resto = cuotas[0], cuotas[1:]
+    ultima = cuotas[-1]["numero_cuota"]
+    hoy = date.today().isoformat()
+    desc = (f"{prest['nombre']} — cancelación (cuotas {primera['numero_cuota']} a {ultima})"
+            if resto else f"{prest['nombre']} — cuota {primera['numero_cuota']}")
+
+    datos_mov = {
+        "descripcion": desc,
+        "monto": round(float(monto), 2),
+        "mes_resumen": mes,
+        "pagado": pagado,
+        "estimado": False,
+        "cuota_nro": primera["numero_cuota"],
+        "cuota_total": prest.get("total_cuotas"),
+    }
+    if primera.get("movimiento_id"):
+        sb.table("movimientos").update(datos_mov).eq("id", primera["movimiento_id"]).execute()
+        mov_id = primera["movimiento_id"]
+    else:
+        cat = sb.table("categorias").select("id").eq("nombre", "Auto").limit(1).execute()
+        ins = sb.table("movimientos").insert({
+            **datos_mov,
+            "usuario_id": str(usuario_id),
+            "fecha": f"{mes}-01",
+            "categoria_id": cat.data[0]["id"] if cat.data else 7,
+            "tipo": "gasto",
+            "origen": "pago",
+            "estado": "confirmado",
+            "grupo": "Préstamo",
+            "prestamo_id": prestamo_id,
+            "debito_automatico": False,
+        }).execute()
+        mov_id = ins.data[0]["id"] if ins.data else None
+
+    sb.table("prestamo_cuotas").update({
+        "movimiento_id": mov_id,
+        **({"pagado": True, "tipo_pago": "adelanto", "monto_pagado": round(float(monto), 2), "fecha_pago": hoy}
+           if pagado else {}),
+    }).eq("id", primera["id"]).execute()
+
+    for c in resto:
+        if c.get("movimiento_id") and c["movimiento_id"] != mov_id:
+            sb.table("movimientos").update({"estado": "anulado"}).eq("id", c["movimiento_id"]).execute()
+        sb.table("prestamo_cuotas").update({
+            "pagado": True, "tipo_pago": "adelanto", "monto_pagado": 0,
+            "fecha_pago": hoy, "movimiento_id": mov_id,
+        }).eq("id", c["id"]).execute()
+
+    return {"movimiento_id": mov_id, "cuotas": [c["numero_cuota"] for c in cuotas], "monto": round(float(monto), 2)}

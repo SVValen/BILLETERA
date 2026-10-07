@@ -19,6 +19,8 @@ interface Item {
   concepto: string | null
   rubro: string | null
   cuota_id?: number
+  prestamo_id?: number | null
+  proyectado?: boolean
 }
 
 interface GrupoEntra { grupo: string; total: number; items: Item[] }
@@ -35,6 +37,7 @@ interface GrupoSale {
   fecha_pago?: string | null
   sin_detallar?: number
   falta?: number
+  proyectado?: boolean
   pagado_monto: number
   items: Item[]
 }
@@ -89,6 +92,7 @@ export default function MesTab({ mes, onMes, onIr }: { mes: string; onMes: (m: s
   const [editIngreso, setEditIngreso] = useState<{ id: number; monto: string } | null>(null)
   const [nuevoIngreso, setNuevoIngreso] = useState<{ descripcion: string; monto: string; grupo: string } | null>(null)
   const [reload, setReload] = useState(0)
+  const [cancelando, setCancelando] = useState<{ prestamo_id: number; monto: string; pagado: boolean } | null>(null)
 
   useEffect(() => {
     let cancel = false
@@ -279,7 +283,7 @@ export default function MesTab({ mes, onMes, onIr }: { mes: string; onMes: (m: s
               ? (g.estado === 'pagado'
                 ? `Pagaste ${fmt(g.monto_pagado ?? g.total)}${g.fecha_pago ? ` el ${g.fecha_pago.slice(8, 10)}/${g.fecha_pago.slice(5, 7)}` : ''}`
                 : `Cargado: ${g.items.length} ${g.items.length === 1 ? 'consumo' : 'consumos'}`)
-              : g.tipo === 'alquiler' ? 'Se paga del 1 al 10'
+              : g.tipo === 'alquiler' ? (g.proyectado ? 'Proyectado con el último valor de cada concepto' : 'Se paga del 1 al 10')
               : g.tipo === 'prestamo' ? 'Débito automático'
               : ''
             return (
@@ -310,7 +314,7 @@ export default function MesTab({ mes, onMes, onIr }: { mes: string; onMes: (m: s
                   </div>
                 )}
 
-                {g.tipo === 'alquiler' && g.estado !== 'pagado' && (
+                {g.tipo === 'alquiler' && g.estado !== 'pagado' && !g.proyectado && (
                   <div className="mes-pagar">
                     <button type="button" className="mes-btn mes-btn-pri" disabled={ocupado === `g-${g.grupo}`}
                       onClick={() => accion(`g-${g.grupo}`, '/api/alquiler', 'POST', { resource: 'pagar_mes', mes })}>
@@ -348,6 +352,39 @@ export default function MesTab({ mes, onMes, onIr }: { mes: string; onMes: (m: s
                         </div>
                       )
                     })}
+                    {g.tipo === 'prestamo' && g.items.filter(i => !i.pagado && i.prestamo_id).map(i => (
+                      cancelando?.prestamo_id === i.prestamo_id ? (
+                        <div className="mes-pagar mes-cancelar" key={`c-${i.id}`}>
+                          <label htmlFor={`cancel-${i.id}`}>Cancelación de {i.descripcion.split(' — ')[0]} en {nombreMes(mes)}: ¿cuánto pagás en total?</label>
+                          <div className="mes-inline">
+                            <input id={`cancel-${i.id}`} className="mes-input" inputMode="decimal" autoFocus value={cancelando?.monto ?? ''}
+                              onChange={e => { const v = e.target.value; setCancelando(c => c && { ...c, monto: v }) }} />
+                            <label className="mes-check">
+                              <input type="checkbox" checked={!!cancelando?.pagado}
+                                onChange={e => { const v = e.target.checked; setCancelando(c => c && { ...c, pagado: v }) }} /> Ya lo pagué
+                            </label>
+                            <button type="button" className="mes-btn mes-btn-sec" onClick={() => setCancelando(null)}>Cancelar</button>
+                            <button type="button" className="mes-btn mes-btn-pri" disabled={ocupado === `cancel-${i.id}`}
+                              onClick={() => {
+                                if (!cancelando) return
+                                const m = parseMonto(cancelando.monto)
+                                if (m == null) return
+                                const body = { resource: 'cancelar', prestamo_id: i.prestamo_id, mes, monto: m, pagado: cancelando.pagado }
+                                setCancelando(null)
+                                accion(`cancel-${i.id}`, '/api/prestamos', 'POST', body)
+                              }}>Guardar</button>
+                          </div>
+                          <span>Las cuotas siguientes quedan saldadas y dejan de aparecer en los próximos meses.</span>
+                        </div>
+                      ) : (
+                        <div className="mes-sub" key={`c-${i.id}`}>
+                          <button type="button" className="mes-link"
+                            onClick={() => setCancelando({ prestamo_id: i.prestamo_id as number, monto: '', pagado: false })}>
+                            Cancelar {i.descripcion.split(' — ')[0]} este mes (adelantar cuotas)
+                          </button>
+                        </div>
+                      )
+                    ))}
                     {g.tipo === 'tarjeta' && (g.sin_detallar ?? 0) > 0 && (
                       <div className="mes-sub mes-sin-detallar">
                         <span>Sin detallar <span className="mes-det">· pagaste más de lo cargado (compras que no llegaron por mail o a mano)</span></span>

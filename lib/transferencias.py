@@ -158,10 +158,14 @@ def opciones(usuario_id: str, trf: dict) -> list[dict]:
         if not items:
             continue
         pendiente = sum(float(i["monto"]) for i in items if not i["pagado"])
-        texto = f"🏠 Alquiler {_mes_corto(m)} · " + (fmt(pendiente) if pendiente > 0 else "ya marcado")
-        total_alq = sum(float(i["monto"]) for i in items)
-        ops.append({"clave": f"a{m}", "texto": texto, "pref": "alquiler", "pagado": pendiente <= 0,
-                    "monto": pendiente if pendiente > 0 else total_alq})
+        ya_pagado = sum(float(i["monto"]) for i in items if i["pagado"])
+        if pendiente > 0:
+            ops.append({"clave": f"a{m}", "texto": f"🏠 Alquiler {_mes_corto(m)} · falta {fmt(pendiente)}",
+                        "pref": "alquiler", "pagado": False, "monto": pendiente})
+        if ya_pagado > 0:
+            # lo que ya está marcado pagado: elegirlo solo vincula la transferencia
+            ops.append({"clave": f"A{m}", "texto": f"🏠 Alquiler {_mes_corto(m)} · ya marcado {fmt(ya_pagado)}",
+                        "pref": "alquiler", "pagado": True, "monto": ya_pagado})
 
     def _cerca(o: dict) -> float:
         return abs(o["monto"] - monto_trf) / max(monto_trf, 1)
@@ -176,6 +180,8 @@ def opciones(usuario_id: str, trf: dict) -> list[dict]:
     ops.append({"clave": GASTO, "texto": "🧾 Fue un gasto (a otra persona)", "pref": GASTO, "pagado": False})
     ops.append({"clave": PROPIA, "texto": "🔁 Pase entre mis cuentas, no es gasto", "pref": PROPIA, "pagado": False})
 
+    if not sug and es_cuenta_propia(usuario_id, trf) is False:
+        sug = GASTO  # destinatario que no es una cuenta tuya conocida: probablemente un gasto
     if sug:
         # lo sugerido arriba de todo (el primero que coincida), con estrella
         for i, o in enumerate(ops):
@@ -194,9 +200,48 @@ def teclado(usuario_id: str, trf: dict) -> dict:
     ]}
 
 
+# Prefijo del CBU/CVU → entidad (los que usa la usuaria y los más comunes)
+_ENTIDADES = [
+    ("0000003", "Mercado Pago"), ("4530000", "Naranja X"), ("0000007", "Ualá"),
+    ("011", "Banco Nación"), ("017", "BBVA"), ("072", "Santander"), ("007", "Galicia"),
+    ("285", "Macro"), ("150", "HSBC"), ("191", "Credicoop"), ("014", "Banco Provincia"),
+]
+
+
+def entidad(cbu: str | None) -> str | None:
+    if not cbu:
+        return None
+    for pref, nombre in _ENTIDADES:
+        if cbu.startswith(pref):
+            return nombre
+    return None
+
+
+def es_cuenta_propia(usuario_id: str, trf: dict) -> bool | None:
+    """True si el destinatario (CUIT) ya se usó en transferencias clasificadas como pago o
+    pase propio; False si hay CUITs propios conocidos y este no es uno; None si no se sabe."""
+    dest = trf.get("destinatario")
+    if not dest:
+        return None
+    r = (
+        get_supabase().table("transferencias").select("destinatario")
+        .eq("usuario_id", int(usuario_id)).in_("estado", ["pago", PROPIA]).neq("id", trf["id"]).execute()
+    ).data or []
+    propios = {x["destinatario"] for x in r if x.get("destinatario")}
+    if not propios:
+        return None
+    return dest in propios
+
+
 def texto_pregunta(trf: dict) -> str:
+    ent = entidad(trf.get("cbu"))
     nombre = "".join(ch for ch in (trf.get("destinatario") or "") if ch not in "*_`[]")
-    dest = f" a *{nombre}*" if nombre else ""
+    if ent and nombre.isdigit():
+        dest = f" a *{ent}* (CUIT {nombre})"
+    elif ent or nombre:
+        dest = f" a *{ent or nombre}*"
+    else:
+        dest = ""
     return (
         f"💸 Transferiste *{fmt(float(trf['monto']))}*{dest} desde el Santander.\n"
         "¿Qué pagaste con eso?"
@@ -328,6 +373,9 @@ def aplicar(usuario_id: str, trf_id: int, clave: str) -> tuple[str, bool]:
         return _aplicar_prestamo(usuario_id, trf, int(clave[1:])), False
     if clave.startswith("a"):
         return _aplicar_alquiler(usuario_id, trf, clave[1:]), False
+    if clave.startswith("A"):
+        _cerrar(trf["id"], "pago", f"alquiler:{clave[1:]}")
+        return f"✅ El alquiler de {_mes_corto(clave[1:])} ya estaba marcado pagado. No lo cargo de nuevo.", False
     return "Opción inválida.", False
 
 

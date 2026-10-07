@@ -683,3 +683,5 @@ html.dark .mes-num-entra { color: #7FCBA8; }
 .subtabs button { font: inherit; font-size: 14px; font-weight: 600; min-height: 40px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--border); background: var(--bg2); color: var(--fg); cursor: pointer; }
 .subtabs button.active { background: var(--b-navy); color: var(--b-white); border-color: var(--b-navy); }
 .prox-queda.sin-datos { font-family: var(--font-body); font-weight: 400; font-size: 13px; color: var(--mes-sub); }
+.mes-check { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; color: var(--fg); min-height: 44px; }
+.mes-cancelar { padding-top: 6px; }

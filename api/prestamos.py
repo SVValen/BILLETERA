@@ -151,6 +151,23 @@ async def prestamos_post(request: Request):
         cuota = pagar_cuota_prestamo(telegram_id, cuota_r.data[0]["id"])
         return JSONResponse({"ok": True, "cuota": cuota})
 
+    # ── cancelar: cancelación anticipada (adelanto de cuotas) en un mes ──────
+    if resource == "cancelar":
+        from lib.pagos import cancelar_prestamo
+        from lib.date_utils import validate_mes
+        mes = body.get("mes", "")
+        try:
+            monto = float(body.get("monto"))
+            prestamo_id = int(body.get("prestamo_id"))
+        except (TypeError, ValueError):
+            return JSONResponse({"error": "Faltan prestamo_id / monto"}, status_code=400)
+        if not validate_mes(mes) or monto <= 0:
+            return JSONResponse({"error": "Mes o monto inválido"}, status_code=400)
+        r = cancelar_prestamo(telegram_id, prestamo_id, mes, monto, bool(body.get("pagado")))
+        if not r:
+            return JSONResponse({"error": "No hay cuotas pendientes desde ese mes"}, status_code=404)
+        return JSONResponse({"ok": True, **r})
+
     # ── importar_prestamo ─────────────────────────────────────────────────────
     if resource == "importar_prestamo":
         nombre = body.get("nombre", "Préstamo")

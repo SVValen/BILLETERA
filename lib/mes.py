@@ -62,12 +62,58 @@ def _item(f: dict) -> dict:
         "pagado": bool(f.get("pagado")),
         "concepto": f.get("concepto"),
         "rubro": f.get("rubro"),
+        "proyectado": bool(f.get("proyectado")),
+        "prestamo_id": f.get("prestamo_id"),
     }
+
+
+def _proyecciones(usuario_id: str, mes: str, filas: list[dict]) -> list[dict]:
+    """Filas virtuales (no están en la base) para que los meses futuros muestren lo que ya se
+    sabe que viene: el alquiler de meses sin filas cargadas y las cuotas de préstamo que
+    todavía no tienen movimiento. Ids negativos; todas estimadas y pendientes."""
+    from lib.alquiler import mes_actual, proyectar_mes
+
+    out: list[dict] = []
+    if mes > mes_actual() and not any(f.get("grupo") == "Alquiler" for f in filas):
+        for k, a in enumerate(proyectar_mes(usuario_id, mes)):
+            out.append({
+                "id": -(1000 + k), "descripcion": a["descripcion"], "monto": float(a["monto"]),
+                "tipo": "gasto", "grupo": "Alquiler", "concepto": a["concepto"], "moneda": "ARS",
+                "monto_original": None, "cuota_nro": None, "cuota_total": None, "debito_automatico": False,
+                "pagado": False, "estimado": True, "tarjeta_id": None, "prestamo_id": None,
+                "rubro": "Departamento", "proyectado": True,
+            })
+
+    sb = get_supabase()
+    prestamos = {
+        p["id"]: p for p in (
+            sb.table("prestamos").select("id, nombre, total_cuotas").eq("usuario_id", int(usuario_id)).execute()
+        ).data or []
+    }
+    if prestamos:
+        cuotas = (
+            sb.table("prestamo_cuotas").select("id, prestamo_id, numero_cuota, pagado, monto_ordinario, capital, movimiento_id")
+            .in_("prestamo_id", list(prestamos)).eq("mes_previsto", mes).execute()
+        ).data or []
+        for c in cuotas:
+            if c.get("movimiento_id") or c.get("pagado"):
+                continue
+            pr = prestamos[c["prestamo_id"]]
+            out.append({
+                "id": -(2000 + int(c["id"])), "descripcion": pr["nombre"],
+                "monto": float(c.get("monto_ordinario") or c.get("capital") or 0),
+                "tipo": "gasto", "grupo": "Préstamo", "concepto": None, "moneda": "ARS",
+                "monto_original": None, "cuota_nro": c["numero_cuota"], "cuota_total": pr.get("total_cuotas"),
+                "debito_automatico": True, "pagado": False, "estimado": False, "tarjeta_id": None,
+                "prestamo_id": c["prestamo_id"], "rubro": "Préstamos", "cuota_id": c["id"],
+            })
+    return out
 
 
 def resumen(usuario_id: str, mes: str, con_items: bool = True) -> dict:
     sb = get_supabase()
     filas = _filas(usuario_id, mes)
+    filas += _proyecciones(usuario_id, mes, filas)
 
     # ── Entra ──
     ing: dict[str, list[dict]] = {}
@@ -141,6 +187,8 @@ def resumen(usuario_id: str, mes: str, con_items: bool = True) -> dict:
             pagado_monto = grupo["total"] if p else 0.0
         else:
             tipo = "prestamo" if g == "Préstamo" else "alquiler" if g == "Alquiler" else "otro"
+            if any(i.get("proyectado") for i in items):
+                grupo["proyectado"] = True
             for i in items:
                 c = cuotas_por_mov.get(i["id"])
                 if c is not None:
@@ -160,6 +208,8 @@ def resumen(usuario_id: str, mes: str, con_items: bool = True) -> dict:
                 it = _item(i)
                 if i.get("cuota_id"):
                     it["cuota_id"] = i["cuota_id"]
+                elif i.get("id", 0) > 0 and cuotas_por_mov.get(i["id"]):
+                    it["cuota_id"] = cuotas_por_mov[i["id"]]["id"]
                 grupo["items"].append(it)
         sale_grupos.append(grupo)
 

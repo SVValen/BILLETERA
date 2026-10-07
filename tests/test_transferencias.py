@@ -28,3 +28,27 @@ def test_transferencia_en_una_linea():
     assert p["destinatario"] == "Juan Perez"
     assert p["cbu"] == "0110000000000000000001"
     assert p["monto"] == 120000.0
+
+
+REAL = """Información sobre tu transferencia
+
+Se realizó la siguiente transferencia a tu nombre:
+
+Destinatario 27000000001
+Cuenta de origen Cuenta en Pesos XXX-XXX 0000
+CBU de Destino 0000003100000000000001
+Importe $ 840.543,80
+Número de comprobante 1
+"""
+
+
+def test_formato_real_santander():
+    from lib.transferencias import entidad
+    assert identificar_tipo_email("Aviso de transferencia", REAL) == TIPO_TRANSFERENCIA
+    p = parse_email(TIPO_TRANSFERENCIA, "Aviso de transferencia", REAL)
+    assert p["monto"] == 840543.80
+    assert p["destinatario"] == "27000000001"
+    assert p["cbu"] == "0000003100000000000001"
+    assert entidad(p["cbu"]) == "Mercado Pago"
+    assert entidad("0170218940000000000000") == "BBVA"
+    assert entidad("0110000000000000000000") == "Banco Nación"

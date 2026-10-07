@@ -77,12 +77,10 @@ def _ultimo_valor(usuario_id: str, concepto: str, antes_de: str) -> float | None
     return float(r.data[0]["monto"]) if r.data else None
 
 
-def asegurar_mes(usuario_id: str, mes: str) -> list[dict]:
-    """Crea los conceptos fijos del mes que falten (pendientes). Idempotente."""
+def _conceptos_nuevos(usuario_id: str, mes: str, existentes: set[str]) -> list[dict]:
     contrato = get_contrato(usuario_id)
     if not contrato or mes < contrato["inicio"][:7]:
         return []
-    existentes = {i["concepto"] for i in items_mes(usuario_id, mes)}
     nuevos = []
     for concepto in CONCEPTOS_FIJOS:
         if concepto in existentes:
@@ -112,9 +110,25 @@ def asegurar_mes(usuario_id: str, mes: str) -> list[dict]:
             "pagado": False,
             "estimado": estimado,
         })
+    return nuevos
+
+
+def asegurar_mes(usuario_id: str, mes: str) -> list[dict]:
+    """Crea los conceptos fijos del mes que falten (pendientes). Idempotente."""
+    existentes = {i["concepto"] for i in items_mes(usuario_id, mes)}
+    nuevos = _conceptos_nuevos(usuario_id, mes, existentes)
     if nuevos:
         get_supabase().table("movimientos").insert(nuevos).execute()
     return nuevos
+
+
+def proyectar_mes(usuario_id: str, mes: str) -> list[dict]:
+    """Lo que se va a pagar de alquiler en un mes futuro que todavía no tiene filas cargadas
+    (no inserta nada): canon vigente + último valor de expensas, agua y gas, todo estimado."""
+    filas = _conceptos_nuevos(usuario_id, mes, set())
+    for f in filas:
+        f["estimado"] = True
+    return filas
 
 
 def marcar_pagado(usuario_id: str, mov_id: int | None = None, mes: str | None = None) -> int:
