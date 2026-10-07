@@ -84,7 +84,10 @@ export default function FamiliaTab({ mes }: { mes: string }) {
     setLoading(true)
     setError(null)
     fetchWithAuth(`/api/familia?mes=${mes}`)
-      .then(r => r.json())
+      .then(async r => {
+        const txt = await r.text()
+        try { return JSON.parse(txt) } catch { return { error: `El servidor respondió ${r.status}. Probá de nuevo en un rato.` } }
+      })
       .then(d => {
         if (cancelled) return
         if (d?.error) { setError(d.error); return }
@@ -104,7 +107,9 @@ export default function FamiliaTab({ mes }: { mes: string }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       })
-      const d = await r.json()
+      const txt = await r.text()
+      let d: { error?: string } | null = null
+      try { d = JSON.parse(txt) } catch { d = { error: `El servidor respondió ${r.status}.` } }
       if (d?.error) setError(d.error)
       setReload(k => k + 1)
     } finally {

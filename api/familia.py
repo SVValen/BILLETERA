@@ -30,7 +30,13 @@ async def familia_get(request: Request):
         return JSONResponse({"error": "mes inválido (YYYY-MM)"}, status_code=400)
 
     sb = get_supabase()
-    fam_r = sb.table("familiares").select("id, nombre, telefono").eq("usuario_id", telegram_id).eq("activo", True).order("id").execute()
+    try:
+        fam_r = sb.table("familiares").select("id, nombre, telefono").eq("usuario_id", telegram_id).eq("activo", True).order("id").execute()
+    except Exception:
+        return JSONResponse(
+            {"error": "Falta crear las tablas de Cuotas familia: corré schema_v2_familia.sql en el SQL Editor de Supabase."},
+            status_code=503,
+        )
     familiares = fam_r.data or []
     fam_ids = [f["id"] for f in familiares]
 
