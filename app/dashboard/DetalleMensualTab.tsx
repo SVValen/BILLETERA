@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import { fetchWithAuth } from '@/lib/fetch-with-auth'
-import { BilleteraAlert, BilleteraBadge } from '@/app/components/design'
+import { BilleteraAlert, BilleteraBadge, BilleteraButton } from '@/app/components/design'
 
 function fmt(n: number) {
   return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(n)
@@ -64,12 +64,35 @@ interface PrestamoMes {
   pagado: boolean
 }
 
+interface AlquilerItem {
+  id: number
+  descripcion: string
+  monto: number
+  concepto: string | null
+  pagado: boolean
+  estimado: boolean
+}
+
+interface AlquilerMes {
+  contrato: { direccion: string | null; inicio: string; dia_vencimiento: number } | null
+  items: AlquilerItem[]
+  total: number
+  pendiente: number
+  hay_estimados?: boolean
+}
+
+const ALQ_EMOJI: Record<string, string> = {
+  alquiler: '🏠', expensas: '🏢', agua: '💧', gas: '🔥', luz: '💡', descuento: '🔧',
+}
+
 export default function DetalleMensualTab({ mes }: { mes: string }) {
   const [cuotas, setCuotas] = useState<Cuota[]>([])
   const [recurrentes, setRecurrentes] = useState<Recurrente[]>([])
   const [tarjetas, setTarjetas] = useState<TarjetaResumen[]>([])
   const [ingresosMes, setIngresosMes] = useState<IngresoMes[]>([])
   const [prestamosMes, setPrestamosMes] = useState<PrestamoMes[]>([])
+  const [alquiler, setAlquiler] = useState<AlquilerMes | null>(null)
+  const [pagandoAlq, setPagandoAlq] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [expanded, setExpanded] = useState<number | null>(null)
@@ -82,21 +105,23 @@ export default function DetalleMensualTab({ mes }: { mes: string }) {
       setLoading(true)
       setError(null)
       try {
-        const [cRes, rRes, tRes, iRes, pRes] = await Promise.all([
+        const [cRes, rRes, tRes, iRes, pRes, aRes] = await Promise.all([
           fetchWithAuth(`/api/cuotas?mes=${mes}`),
           fetchWithAuth(`/api/recurrentes?dias=35`),
           fetchWithAuth(`/api/stats?mes=${mes}&resource=tarjetas`),
           fetchWithAuth(`/api/recurrentes?resource=ingresos_mes&mes=${mes}`),
           fetchWithAuth(`/api/prestamos?resource=prestamos_mes&mes=${mes}`),
+          fetchWithAuth(`/api/alquiler?mes=${mes}`),
         ])
         if (cancelled) return
-        const [cData, rData, tData, iData, pData] = await Promise.all([cRes.json(), rRes.json(), tRes.json(), iRes.json(), pRes.json()])
+        const [cData, rData, tData, iData, pData, aData] = await Promise.all([cRes.json(), rRes.json(), tRes.json(), iRes.json(), pRes.json(), aRes.json()])
         if (cancelled) return
         setCuotas(Array.isArray(cData) ? cData : [])
         setRecurrentes(Array.isArray(rData) ? rData : [])
         setTarjetas(Array.isArray(tData?.tarjetas) ? tData.tarjetas : [])
         setIngresosMes(Array.isArray(iData) ? iData : [])
         setPrestamosMes(Array.isArray(pData) ? pData : [])
+        setAlquiler(aData && Array.isArray(aData.items) ? aData : null)
         setExpanded(null)
         setDetalle({})
       } catch (e) {
@@ -126,6 +151,22 @@ export default function DetalleMensualTab({ mes }: { mes: string }) {
     }
   }, [expanded, detalle, mes])
 
+  const pagarAlquiler = async (body: { resource: 'pagar'; id: number } | { resource: 'pagar_mes'; mes: string }) => {
+    setPagandoAlq(body.resource === 'pagar' ? String(body.id) : 'todo')
+    try {
+      await fetchWithAuth('/api/alquiler', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      const r = await fetchWithAuth(`/api/alquiler?mes=${mes}`)
+      const data = await r.json()
+      setAlquiler(data && Array.isArray(data.items) ? data : null)
+    } finally {
+      setPagandoAlq(null)
+    }
+  }
+
   if (loading) return <p className="loading">Cargando...</p>
   if (error) return <BilleteraAlert variant="danger" title="Error">{error}</BilleteraAlert>
 
@@ -136,7 +177,8 @@ export default function DetalleMensualTab({ mes }: { mes: string }) {
   const totalTarjetaMes = totalPendiente + totalPagado
   const totalIngresosMes = ingresosMes.reduce((s, i) => s + (i.monto_registrado ?? i.monto_esperado), 0)
   const totalPrestamoMes = prestamosMes.reduce((s, p) => s + p.monto, 0)
-  const montoLibre = totalIngresosMes - totalTarjetaMes - totalPrestamoMes
+  const totalAlquilerMes = alquiler?.total ?? 0
+  const montoLibre = totalIngresosMes - totalTarjetaMes - totalPrestamoMes - totalAlquilerMes
 
   return (
     <>
@@ -289,14 +331,64 @@ export default function DetalleMensualTab({ mes }: { mes: string }) {
         </div>
       )}
 
+      {/* Alquiler del mes: alquiler, expensas, agua, gas, luz y descuentos */}
+      {alquiler && alquiler.items.length > 0 && (
+        <div className="widget-box">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, flexWrap: 'wrap', gap: 8 }}>
+            <h3 className="widget-title" style={{ margin: 0 }}>🏠 Alquiler — {mes}</h3>
+            <div style={{ fontSize: 20, fontWeight: 800, letterSpacing: '-0.3px' }}>{fmt(alquiler.total)}</div>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {alquiler.items.map(i => (
+              <div key={i.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, fontSize: 14, flexWrap: 'wrap' }}>
+                <span>
+                  {ALQ_EMOJI[i.concepto ?? ''] ?? '•'} {i.descripcion}
+                  {i.estimado && <span className="muted" style={{ fontSize: 12 }}> · estimado</span>}
+                </span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  {i.concepto !== 'descuento' && (i.pagado
+                    ? <BilleteraBadge variant="green">✅ Pagado</BilleteraBadge>
+                    : <BilleteraBadge variant="gold">⏳ Pendiente</BilleteraBadge>)}
+                  <span style={{ fontWeight: 700, color: i.monto < 0 ? 'var(--b-green)' : undefined }}>{fmt(i.monto)}</span>
+                  {!i.pagado && (
+                    <BilleteraButton size="sm" variant="outline" loading={pagandoAlq === String(i.id)}
+                      onClick={() => pagarAlquiler({ resource: 'pagar', id: i.id })}>
+                      Pagado
+                    </BilleteraButton>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+          {alquiler.pendiente > 0 && (
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 14, gap: 8, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 13 }}>
+                Pendiente: <strong>{fmt(alquiler.pendiente)}</strong>
+                {alquiler.contrato && <span className="muted"> · vence el {alquiler.contrato.dia_vencimiento}</span>}
+              </span>
+              <BilleteraButton size="sm" variant="gold" loading={pagandoAlq === 'todo'}
+                onClick={() => pagarAlquiler({ resource: 'pagar_mes', mes })}>
+                Marcar todo pagado
+              </BilleteraButton>
+            </div>
+          )}
+          {alquiler.hay_estimados && (
+            <p className="muted" style={{ fontSize: 12, marginTop: 10, marginBottom: 0 }}>
+              Los montos estimados se actualizan con la liquidación de expensas y el ajuste por IPC.
+            </p>
+          )}
+        </div>
+      )}
+
       {/* Monto libre: ingresos - tarjeta - préstamo */}
-      {(ingresosMes.length > 0 || tarjetas.length > 0 || prestamosMes.length > 0) && (
+      {(ingresosMes.length > 0 || tarjetas.length > 0 || prestamosMes.length > 0 || totalAlquilerMes !== 0) && (
         <div className="widget-box">
           <h3 className="widget-title">🧮 Te queda libre</h3>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 13, color: 'var(--fg3)', marginBottom: 10 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Ingresos</span><span>{fmt(totalIngresosMes)}</span></div>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>- Tarjeta</span><span>{fmt(totalTarjetaMes)}</span></div>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>- Cuota préstamo</span><span>{fmt(totalPrestamoMes)}</span></div>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>- Alquiler</span><span>{fmt(totalAlquilerMes)}</span></div>
           </div>
           <p className={`card-value ${montoLibre >= 0 ? 'ingreso' : 'gasto'}`} style={{ margin: 0 }}>{fmt(montoLibre)}</p>
         </div>
@@ -364,7 +456,7 @@ export default function DetalleMensualTab({ mes }: { mes: string }) {
         </div>
       )}
 
-      {tarjetas.length === 0 && cuotas.length === 0 && recurrentes.length === 0 && ingresosMes.length === 0 && prestamosMes.length === 0 && (
+      {tarjetas.length === 0 && cuotas.length === 0 && recurrentes.length === 0 && ingresosMes.length === 0 && prestamosMes.length === 0 && !alquiler?.items.length && (
         <p className="empty">Sin cuotas, recordatorios ni tarjetas este mes. 🎉</p>
       )}
     </>

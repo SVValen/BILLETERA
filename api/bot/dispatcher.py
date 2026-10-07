@@ -13,6 +13,7 @@ from .handlers.tarjetas import (
 )
 from .handlers.recurrentes import handle_recurrente_text
 from .handlers.transferencias import handle_transferencia_text
+from .handlers.alquiler import handle_alquiler_cmd, handle_alquiler_callback, handle_descuento_text
 from .handlers.prestamos import handle_prestamo_callback, handle_prestamos_cmd, detect_prestamo_text
 
 
@@ -32,6 +33,8 @@ async def dispatch_callback(cq: dict, token: str) -> None:
     if await handle_pagar_tarjeta_callback(parts, callback_id, chat_id, message_id, user_id, supabase, token):
         return
     if await handle_prestamo_callback(parts, callback_id, chat_id, message_id, user_id, supabase, token):
+        return
+    if await handle_alquiler_callback(parts, callback_id, chat_id, message_id, user_id, token):
         return
 
 
@@ -63,6 +66,8 @@ async def dispatch_message(message: dict, token: str) -> None:
             return
         if await handle_transferencia_text(transcribed, user_id, chat_id, token):
             return
+        if await handle_descuento_text(transcribed, user_id, chat_id, token):
+            return
         await _process_text(transcribed, user_id, chat_id, token)
         return
     else:
@@ -78,6 +83,8 @@ async def dispatch_message(message: dict, token: str) -> None:
         if await handle_recurrente_text(text, user_id, chat_id, token):
             return
         if await handle_transferencia_text(text, user_id, chat_id, token):
+            return
+        if await handle_descuento_text(text, user_id, chat_id, token):
             return
 
     # ── Comandos ──
@@ -165,6 +172,11 @@ async def dispatch_message(message: dict, token: str) -> None:
         if token:
             args = text[len("/presupuesto"):].strip()
             await _handle_presupuesto_cmd(user_id, chat_id, args, token)
+        return
+
+    if text.lower().startswith("/alquiler"):
+        if token:
+            await handle_alquiler_cmd(text, user_id, chat_id, token)
         return
 
     if text.lower().startswith("/prestamos"):

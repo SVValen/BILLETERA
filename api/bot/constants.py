@@ -30,6 +30,10 @@ AYUDA = (
     "  `/pagar_tarjeta` — calcula lo que corresponde pagar este mes por tarjeta (cuotas + compras en 1 pago) y registra el pago\n"
     "  _Al registrar un gasto te pregunto cómo lo pagaste._\n\n"
 
+    "🏠 *Alquiler:*\n"
+    "  `/alquiler` — alquiler, expensas, agua y gas del mes, con botones para marcar pagos\n"
+    "  `descuento 28500 ducha` — descontar un arreglo del alquiler del mes\n\n"
+
     "🏦 *Préstamos:*\n"
     "  `/prestamos` — ver estado del préstamo y pagar cuotas\n"
     "  _Al pagar, te ofrezco adelantar cuotas (Capital × 1.25)._\n\n"

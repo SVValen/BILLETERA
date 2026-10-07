@@ -68,6 +68,18 @@ async def _procesar_recurrentes(hoy: date, token: str) -> int:
     return enviados
 
 
+def _asegurar_alquileres(hoy: date) -> int:
+    """Crea como pendientes los conceptos de alquiler del mes en curso y del próximo."""
+    from lib import alquiler as alq
+    contratos = get_supabase().table("alquiler_contrato").select("usuario_id").eq("activo", True).execute()
+    mes = hoy.strftime("%Y-%m")
+    creados = 0
+    for c in (contratos.data or []):
+        for m in (mes, alq.sumar_meses(mes, 1)):
+            creados += len(alq.asegurar_mes(c["usuario_id"], m))
+    return creados
+
+
 @app.get("/api/cron")
 async def cron_job(request: Request, job: str = ""):
     cron_secret = os.environ.get("CRON_SECRET", "")
@@ -87,9 +99,11 @@ async def cron_job(request: Request, job: str = ""):
 
     hoy = date.today()
     rec_enviados = await _procesar_recurrentes(hoy, token)
+    alquiler_creados = _asegurar_alquileres(hoy)
 
     return JSONResponse({
         "ok": True,
         "fecha": hoy.isoformat(),
         "recordatorios": rec_enviados,
+        "alquiler_conceptos_creados": alquiler_creados,
     })
