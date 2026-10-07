@@ -28,6 +28,10 @@ from lib.email_parser_santander import (
 )
 from api.bot.tg import _send
 from lib.cotizacion import get_dolar, campos_usd
+from lib.email_parser_naranja import (
+    NARANJA_SENDER, TIPO_NARANJA_COMPRA, identificar_tipo_email_naranja, parse_email_naranja,
+)
+from email.utils import parsedate_to_datetime
 from api.bot.keyboards import _cuota_fecha_keyboard
 from api.bot.helpers import _categorize
 from api.bot.handlers.movimientos import _save_and_confirm
@@ -128,6 +132,15 @@ async def _resolver_tarjeta_last4(usuario_id: str, last4: str, token: str) -> in
     return None
 
 
+def _tarjeta_por_nombre(usuario_id: str, nombre: str) -> int | None:
+    r = (
+        get_supabase().table("tarjetas").select("id")
+        .eq("usuario_id", usuario_id).eq("activa", True).ilike("nombre", f"%{nombre}%")
+        .limit(1).execute()
+    )
+    return r.data[0]["id"] if r.data else None
+
+
 async def _procesar_parsed(usuario_id: str, tipo: str, parsed: dict, token: str) -> tuple[bool, int | None, int | None]:
     """
     Rutea un mail ya parseado al flujo correspondiente.
@@ -140,10 +153,19 @@ async def _procesar_parsed(usuario_id: str, tipo: str, parsed: dict, token: str)
     # TIPO_DEBITO_AUTOMATICO = débito automático EN TARJETA DE CRÉDITO (ej. Netflix,
     # Apple — ver docstring del módulo). Va con el resto de compras de crédito en 1
     # pago, no con TIPO_PAGO_DEBITO (tarjeta de débito real, que sí es efectivo).
+    # Naranja: 1 pago se trata como compra en 1 pago; N cuotas, como compra en cuotas
+    if tipo == TIPO_NARANJA_COMPRA:
+        tipo = TIPO_PAGO_CUOTAS if parsed.get("num_cuotas", 1) > 1 else TIPO_PAGO_1_PAGO
+
     if tipo in (TIPO_PAGO_1_PAGO, TIPO_PAGO_CUOTAS, TIPO_DEBITO_AUTOMATICO):
-        tarjeta_id = await _resolver_tarjeta_last4(usuario_id, parsed["last4"], token)
-        if tarjeta_id is None:
-            return False, None, None
+        if parsed.get("tarjeta_nombre"):
+            tarjeta_id = _tarjeta_por_nombre(usuario_id, parsed["tarjeta_nombre"])
+            if tarjeta_id is None:
+                return False, None, None
+        else:
+            tarjeta_id = await _resolver_tarjeta_last4(usuario_id, parsed["last4"], token)
+            if tarjeta_id is None:
+                return False, None, None
 
         hoy = date.fromisoformat(parsed["fecha"])
         tar_r = supabase.table("tarjetas").select("dia_cierre").eq("id", tarjeta_id).single().execute()
@@ -290,7 +312,7 @@ async def _avisar_fallo_login(usuario_id: str, token: str) -> None:
 
     await _send(
         int(usuario_id),
-        "⚠️ No pude conectarme a tu Gmail para leer los avisos de Santander — "
+        "⚠️ No pude conectarme a tu Gmail para leer los avisos de Santander y Naranja — "
         "probablemente venció o se revocó la contraseña de aplicación. "
         "Generá una nueva en myaccount.google.com/apppasswords y actualizala "
         "para que vuelva a detectar tus compras y transferencias automáticamente.",
@@ -302,7 +324,7 @@ _MAX_DETALLE_ERRORES = 5
 
 
 async def sync_gmail_for_user(usuario_id: str, gmail_email: str, gmail_app_password: str, token: str) -> dict:
-    """Procesa los mails no leídos de Santander de un usuario. Aísla fallos por mail."""
+    """Procesa los avisos de Santander y Naranja de un usuario. Aísla fallos por mail."""
     supabase = get_supabase()
     stats = {"vistos": 0, "procesados": 0, "pendientes_tarjeta": 0, "ignorados": 0, "errores": 0, "errores_detalle": []}
 
@@ -320,12 +342,13 @@ async def sync_gmail_for_user(usuario_id: str, gmail_email: str, gmail_app_passw
         desde = _imap_since_date(date.today() - timedelta(days=_DIAS_VENTANA_BUSQUEDA))
         # No filtramos por UNSEEN: un mail leído manualmente (preview de Gmail, celular, etc.)
         # no debe perderse — el dedup real es por Message-ID en email_procesados.
-        status, data = imap.search(None, "SINCE", desde, f'FROM "{SANTANDER_SENDER}"')
-        if status != "OK":
-            return stats
+        a_procesar: list[tuple[bytes, str]] = []
+        for sender, banco in ((SANTANDER_SENDER, "santander"), (NARANJA_SENDER, "naranja")):
+            status, data = imap.search(None, "SINCE", desde, f'FROM "{sender}"')
+            if status == "OK" and data and data[0]:
+                a_procesar.extend((num, banco) for num in data[0].split())
 
-        msg_nums = data[0].split()
-        for num in msg_nums:
+        for num, banco in a_procesar:
             stats["vistos"] += 1
             tipo = None
             try:
@@ -354,8 +377,16 @@ async def sync_gmail_for_user(usuario_id: str, gmail_email: str, gmail_app_passw
                 subject = _decode_header_value(msg.get("Subject"))
                 body = _extract_body(msg)
 
-                tipo = identificar_tipo_email(subject, body)
-                parsed = parse_email(tipo, subject, body) if tipo else None
+                if banco == "naranja":
+                    try:
+                        fecha_mail = parsedate_to_datetime(msg.get("Date")).date()
+                    except Exception:
+                        fecha_mail = date.today()
+                    tipo = identificar_tipo_email_naranja(subject, body)
+                    parsed = parse_email_naranja(subject, body, fecha_mail) if tipo else None
+                else:
+                    tipo = identificar_tipo_email(subject, body)
+                    parsed = parse_email(tipo, subject, body) if tipo else None
 
                 if not tipo or not parsed:
                     supabase.table("email_procesados").insert({
