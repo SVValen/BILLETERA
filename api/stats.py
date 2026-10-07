@@ -88,6 +88,48 @@ async def get_stats(request: Request):
     if not validate_mes(mes):
         return JSONResponse({"error": "Formato de mes inválido (YYYY-MM)"}, status_code=400)
 
+    # ── planilla del mes: todas las filas del mes de pago, como el Excel ──
+    if request.query_params.get("resource") == "planilla":
+        rows = (
+            supabase.table("movimientos")
+            .select("id, descripcion, monto, tipo, grupo, concepto, moneda, monto_original, tipo_cambio, "
+                    "cuota_nro, cuota_total, debito_automatico, pagado, estimado, estado, categorias(nombre, emoji)")
+            .eq("usuario_id", telegram_id)
+            .eq("mes_resumen", mes)
+            .neq("es_pago_tarjeta", True)
+            .not_.in_("estado", ["anulado", "pendiente_moneda", "pendiente_tarjeta", "pendiente_descripcion_transferencia"])
+            .order("monto", desc=True)
+            .execute()
+        )
+        pagos_r = (
+            supabase.table("tarjeta_pagos")
+            .select("monto_pagado, monto_calculado, tarjetas(nombre)")
+            .eq("usuario_id", telegram_id).eq("mes_resumen", mes)
+            .not_.is_("monto_pagado", "null")
+            .execute()
+        )
+        pagos = {
+            "Tarjeta " + ((p.get("tarjetas") or {}).get("nombre") or ""): float(p["monto_pagado"])
+            for p in (pagos_r.data or [])
+        }
+        filas = []
+        for r in (rows.data or []):
+            cat = r.pop("categorias", None) or {}
+            r["rubro"] = cat.get("nombre")
+            r["emoji"] = cat.get("emoji")
+            r["monto"] = float(r["monto"])
+            filas.append(r)
+        ingresos = sum(f["monto"] for f in filas if f["tipo"] == "ingreso")
+        gastos = sum(f["monto"] for f in filas if f["tipo"] == "gasto")
+        return JSONResponse({
+            "mes": mes,
+            "filas": filas,
+            "total_ingresos": round(ingresos, 2),
+            "total_gastos": round(gastos, 2),
+            "neto": round(ingresos - gastos, 2),
+            "pagos_tarjeta": pagos,
+        })
+
     # ── resumen por tarjeta del mes de resumen (lo que corresponde pagar) ──
     if request.query_params.get("resource") == "tarjetas":
         rows = (

@@ -508,3 +508,36 @@ td.date { color: var(--fg3); white-space: nowrap; font-size: 13px; }
 .auth-divider::before, .auth-divider::after { content: ''; flex: 1; height: 1px; background: var(--border); }
 
 @media (max-width: 480px) { .auth-card { padding: 30px 20px; } }
+
+/* ── Planilla del mes (misma estructura que la hoja de Excel) ── */
+.planilla { display: flex; flex-direction: column; gap: 20px; }
+.planilla-num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+.planilla-neto { text-align: center; padding: 8px 16px 4px; }
+.planilla-neto h3 { margin: 0 0 6px; font-family: var(--font-display); font-size: 16px; font-weight: 700; color: var(--fg2); }
+.planilla-neto-cuenta { display: flex; justify-content: center; gap: 24px; flex-wrap: wrap; font-size: 14px; color: var(--fg3); }
+.planilla-neto-cuenta strong { color: var(--fg); font-weight: 600; margin-left: 6px; }
+.planilla-neto-valor { margin: 14px 0 0; font-family: var(--font-display); font-size: clamp(40px, 9vw, 64px); line-height: 1; letter-spacing: -1.5px; font-weight: 800; }
+.planilla-neto-label { margin: 6px 0 0; font-size: 13px; color: var(--fg3); }
+
+.planilla-columnas { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 16px; align-items: start; }
+.planilla-lado .widget-title { margin-bottom: 8px; }
+
+.planilla-grupo { padding: 12px 0 4px; border-top: 1px solid var(--border); }
+.planilla-grupo:first-of-type { border-top: 0; padding-top: 4px; }
+.planilla-grupo-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 4px; }
+.planilla-grupo-head h4 { margin: 0; font-size: 14px; font-weight: 600; }
+.planilla-subtotal { font-family: var(--font-display); font-weight: 700; font-size: 15px; }
+
+.planilla-tabla { width: 100%; border-collapse: collapse; font-size: 13px; }
+.planilla-tabla td { padding: 4px 0; vertical-align: top; }
+.planilla-concepto { color: var(--fg); padding-right: 8px; }
+.planilla-meta { display: block; font-size: 11.5px; color: var(--fg3); }
+.planilla-cuota { width: 48px; text-align: right; color: var(--fg3); padding-right: 12px; font-variant-numeric: tabular-nums; }
+.planilla-tabla .planilla-num { text-align: right; width: 1%; }
+.planilla-tabla tr.es-descuento .planilla-num { color: var(--b-green); }
+.planilla-pie { margin: 2px 0 8px; font-size: 12px; color: var(--fg3); text-align: right; }
+
+@media (max-width: 720px) {
+  .planilla-columnas { grid-template-columns: 1fr; }
+}
