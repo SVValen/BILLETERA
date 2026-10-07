@@ -297,10 +297,15 @@ async def handle_movimiento_callback(
 
     if parts[0] == "cuota_fecha" and len(parts) == 3:
         plan_id, proximo = int(parts[1]), int(parts[2])
-        plan_check = supabase.table("cuotas_plan").select("usuario_id").eq("id", plan_id).single().execute()
+        plan_check = supabase.table("cuotas_plan").select("usuario_id, activo").eq("id", plan_id).single().execute()
         if not plan_check.data or plan_check.data["usuario_id"] != user_id:
             if token:
                 await _answer_callback(callback_id, token)
+            return True
+        if plan_check.data.get("activo") is False:
+            if token:
+                await _answer_callback(callback_id, token)
+                await _edit_message(chat_id, message_id, "Esa compra ya estaba cargada, no la vuelvo a cargar.", token)
             return True
         hoy = date.today()
         meses = proximo if (proximo > 0 or hoy.day == 1) else 1

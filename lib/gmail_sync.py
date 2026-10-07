@@ -139,6 +139,31 @@ def _tarjeta_por_nombre(usuario_id: str, nombre: str) -> int | None:
     return r.data[0]["id"] if r.data else None
 
 
+def _ya_cargado(usuario_id: str, tarjeta_id: int, mes_resumen: str, monto: float) -> dict | None:
+    """Fila cargada a mano / desde el Excel para la misma tarjeta y resumen con casi el mismo
+    monto (±1,5%), que todavía no se cruzó con un mail. Evita duplicar débitos y compras."""
+    r = (
+        get_supabase().table("movimientos").select("id, descripcion, monto")
+        .eq("usuario_id", usuario_id).eq("tarjeta_id", tarjeta_id).eq("mes_resumen", mes_resumen)
+        .eq("tipo", "gasto").neq("estado", "anulado").in_("origen", ["excel", "telegram"])
+        .is_("cuota_plan_id", "null").execute()
+    ).data or []
+    tol = max(1.0, monto * 0.015)
+    cand = [m for m in r if abs(float(m["monto"]) - monto) <= tol]
+    return min(cand, key=lambda m: abs(float(m["monto"]) - monto)) if cand else None
+
+
+def _plan_ya_cargado(usuario_id: str, tarjeta_id: int, num_cuotas: int, monto_total: float) -> dict | None:
+    r = (
+        get_supabase().table("cuotas_plan").select("id, descripcion, monto_total")
+        .eq("usuario_id", usuario_id).eq("tarjeta_id", tarjeta_id).eq("num_cuotas", num_cuotas)
+        .eq("activo", True).execute()
+    ).data or []
+    tol = max(1.0, monto_total * 0.015)
+    cand = [p for p in r if abs(float(p["monto_total"]) - monto_total) <= tol]
+    return cand[0] if cand else None
+
+
 async def _procesar_parsed(usuario_id: str, tipo: str, parsed: dict, token: str) -> tuple[bool, int | None, int | None]:
     """
     Rutea un mail ya parseado al flujo correspondiente.
@@ -181,6 +206,15 @@ async def _procesar_parsed(usuario_id: str, tipo: str, parsed: dict, token: str)
             usd = campos_usd(parsed["monto"], tasa)
 
         if tipo in (TIPO_PAGO_1_PAGO, TIPO_DEBITO_AUTOMATICO):
+            monto_ars = float(usd.get("monto", parsed["monto"]))
+            previo = _ya_cargado(usuario_id, tarjeta_id, mes_resumen, monto_ars)
+            if previo:
+                # ya estaba cargado (Excel / a mano): se completa con el dato real, sin duplicar
+                supabase.table("movimientos").update({
+                    "monto": monto_ars, "fecha": parsed["fecha"], "origen": "excel+email", "estimado": False,
+                    **{k: v for k, v in usd.items() if k != "monto"},
+                }).eq("id", previo["id"]).execute()
+                return True, previo["id"], None
             ins = supabase.table("movimientos").insert({
                 "usuario_id": usuario_id,
                 "fecha": parsed["fecha"],
@@ -207,6 +241,15 @@ async def _procesar_parsed(usuario_id: str, tipo: str, parsed: dict, token: str)
         # TIPO_PAGO_CUOTAS — el monto del mail es el total de la compra
         num_cuotas = parsed["num_cuotas"]
         monto_total = usd.get("monto", parsed["monto"])
+        plan_previo = _plan_ya_cargado(usuario_id, tarjeta_id, num_cuotas, float(monto_total))
+        if plan_previo:
+            await _send(
+                chat_id,
+                f"💳 *{parsed['descripcion']}* en {num_cuotas} cuotas: ya la tenías cargada como "
+                f"*{plan_previo['descripcion']}*, no la cargo de nuevo.",
+                token,
+            )
+            return True, None, plan_previo["id"]
         monto_cuota = round(monto_total / num_cuotas, 2)
         ins = supabase.table("cuotas_plan").insert({
             "usuario_id": usuario_id,
