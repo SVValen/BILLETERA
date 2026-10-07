@@ -12,6 +12,7 @@ from lib.date_utils import validate_mes
 app = FastAPI()
 
 CAT_COMPRAS_FAMILIA = 15
+MENSUAL_SIN_FIN = 999  # num_cuotas >= 999 en familia_manual = todos los meses
 
 
 def _meses_entre(desde: str, hasta: str) -> int:
@@ -107,14 +108,16 @@ async def familia_get(request: Request):
             manuales = []  # schema_v2_familia_manual.sql todavía no aplicado
         for mm in manuales:
             n = _meses_entre(mm["mes_primera"], mes) + 1
-            if 1 <= n <= int(mm["num_cuotas"]) and mm["familiar_id"] in items:
+            total = int(mm["num_cuotas"])
+            mensual = total >= MENSUAL_SIN_FIN  # gasto fijo de todos los meses (ej. seguro)
+            if 1 <= n <= total and mm["familiar_id"] in items:
                 items[mm["familiar_id"]].append({
                     "manual_id": mm["id"],
                     "asignacion_id": None,
                     "movimiento_id": None,
                     "descripcion": mm["descripcion"],
-                    "cuota_nro": n if int(mm["num_cuotas"]) > 1 else None,
-                    "cuota_total": int(mm["num_cuotas"]) if int(mm["num_cuotas"]) > 1 else None,
+                    "cuota_nro": n if 1 < total and not mensual else None,
+                    "cuota_total": total if 1 < total and not mensual else None,
                     "tarjeta": "a mano",
                     "monto": round(float(mm["monto"]), 2),
                     "parcial": False,
@@ -197,6 +200,8 @@ async def familia_post(request: Request):
             monto = round(float(body.get("monto")), 2)
             cuota_actual = int(body.get("cuota_actual") or 1)
             num_cuotas = int(body.get("num_cuotas") or 1)
+            if body.get("todos_los_meses"):
+                cuota_actual, num_cuotas = 1, MENSUAL_SIN_FIN
         except (TypeError, ValueError):
             return JSONResponse({"error": "Monto o cuotas inválidos"}, status_code=400)
         if not validate_mes(mes) or not descripcion or monto <= 0 or not (1 <= cuota_actual <= num_cuotas):

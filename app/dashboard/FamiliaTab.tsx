@@ -79,7 +79,7 @@ export default function FamiliaTab({ mes }: { mes: string }) {
   const [verTodas, setVerTodas] = useState(false)
   const [telefonos, setTelefonos] = useState<Record<number, string>>({})
   const [nuevo, setNuevo] = useState({ nombre: '', telefono: '' })
-  const [manual, setManual] = useState<Record<number, { descripcion: string; monto: string; cuota: string; total: string } | null>>({})
+  const [manual, setManual] = useState<Record<number, { descripcion: string; monto: string; cuota: string; total: string; fijo?: boolean } | null>>({})
 
   useEffect(() => {
     let cancelled = false
@@ -199,7 +199,12 @@ export default function FamiliaTab({ mes }: { mes: string }) {
                 value={manual[f.id]!.monto}
                 onChange={e => setManual(prev => ({ ...prev, [f.id]: { ...prev[f.id]!, monto: e.target.value } }))}
                 aria-label="Monto por mes" />
-              <span style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 4 }}>
+              <label style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 4 }}>
+                <input type="checkbox" checked={!!manual[f.id]!.fijo}
+                  onChange={e => setManual(prev => ({ ...prev, [f.id]: { ...prev[f.id]!, fijo: e.target.checked } }))} />
+                Todos los meses
+              </label>
+              {!manual[f.id]!.fijo && <span style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 4 }}>
                 cuota
                 <input className="month-input" style={{ width: 52 }} inputMode="numeric" value={manual[f.id]!.cuota}
                   onChange={e => setManual(prev => ({ ...prev, [f.id]: { ...prev[f.id]!, cuota: e.target.value } }))}
@@ -208,14 +213,14 @@ export default function FamiliaTab({ mes }: { mes: string }) {
                 <input className="month-input" style={{ width: 52 }} inputMode="numeric" value={manual[f.id]!.total}
                   onChange={e => setManual(prev => ({ ...prev, [f.id]: { ...prev[f.id]!, total: e.target.value } }))}
                   aria-label="Cantidad de cuotas" />
-              </span>
+              </span>}
               <BilleteraButton size="sm" variant="primary" loading={ocupado === `nm-${f.id}`}
                 onClick={async () => {
                   const m = manual[f.id]!
                   const monto = Number(m.monto.includes(',') ? m.monto.replace(/\./g, '').replace(',', '.') : m.monto.replace(/\.(?=\d{3}(\D|$))/g, ''))
                   await post(`nm-${f.id}`, {
                     resource: 'manual', familiar_id: f.id, mes, descripcion: m.descripcion, monto,
-                    cuota_actual: Number(m.cuota || 1), num_cuotas: Number(m.total || 1),
+                    cuota_actual: Number(m.cuota || 1), num_cuotas: Number(m.total || 1), todos_los_meses: !!m.fijo,
                   })
                   setManual(prev => ({ ...prev, [f.id]: null }))
                 }}>
