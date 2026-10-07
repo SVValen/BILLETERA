@@ -89,7 +89,8 @@ async def familia_get(request: Request):
             items[a["familiar_id"]].append({
                 "asignacion_id": a["id"],
                 "movimiento_id": m["id"],
-                "descripcion": m["descripcion"].split(" (cuota ")[0],
+                # la nota de la asignación es el nombre con el que se lo cobrás (ej. "Juego llaves")
+                "descripcion": a.get("nota") or m["descripcion"].split(" (cuota ")[0],
                 "cuota_nro": m.get("cuota_nro"),
                 "cuota_total": m.get("cuota_total"),
                 "tarjeta": (m.get("grupo") or "").replace("Tarjeta ", ""),
