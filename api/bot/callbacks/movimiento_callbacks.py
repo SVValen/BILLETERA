@@ -45,7 +45,7 @@ async def handle_movimiento_callback(
                 if token:
                     await _answer_callback(callback_id, token)
                     await _edit_message(chat_id, message_id,
-                        f"🤔 Registré *${monto:,.0f}* — ¿está bien o querías decir *${monto * 1000:,.0f}*?",
+                        f"🤔 *{mov.get('descripcion') or ''}*: registré *${monto:,.0f}* — ¿está bien o querías decir *${monto * 1000:,.0f}*?",
                         token, reply_markup=_monto_keyboard(mov_id, monto))
             elif cat_id == 7:
                 updates["estado"] = "pendiente_categoria"
@@ -54,9 +54,7 @@ async def handle_movimiento_callback(
                     await _answer_callback(callback_id, token)
                     await _edit_message(chat_id, message_id,
                         f"📌 Guardé *${monto:,.0f}* — ¿en qué categoría va *{mov['descripcion']}*?",
-                        token)
-                    await _send(chat_id, "Elegí categoría:", token, parse_mode="",
-                                reply_markup=_category_keyboard(mov_id))
+                        token, reply_markup=_category_keyboard(mov_id))
             else:
                 updates["estado"] = "confirmado"
                 supabase.table("movimientos").update(updates).eq("id", mov_id).execute()
@@ -240,8 +238,8 @@ async def handle_movimiento_callback(
             await _answer_callback(callback_id, token)
             if updates["estado"] == "pendiente_categoria":
                 await _edit_message(chat_id, message_id,
-                    f"📌 Guardé *${nuevo:,.0f}*{detalle_usd} — ¿en qué categoría va *{mov['descripcion']}*?", token)
-                await _send(chat_id, "Elegí categoría:", token, parse_mode="", reply_markup=_category_keyboard(mov_id))
+                    f"📌 Guardé *${nuevo:,.0f}*{detalle_usd} — ¿en qué categoría va *{mov['descripcion']}*?", token,
+                    reply_markup=_category_keyboard(mov_id))
             else:
                 signo = "-" if mov["tipo"] == "gasto" else "+"
                 await _edit_message(chat_id, message_id, f"✅ Registrado: {signo}${nuevo:,.0f}{detalle_usd}", token)
@@ -282,9 +280,8 @@ async def handle_movimiento_callback(
                 await _answer_callback(callback_id, token)
                 if categoria_id == 7 and tipo == "gasto":
                     await _edit_message(chat_id, message_id,
-                        f"💲 Actualizado a ${nuevo_monto:,.0f} — ¿categoría?", token)
-                    await _send(chat_id, f"¿En qué categoría va *{descripcion}*?", token,
-                                reply_markup=_category_keyboard(movement_id))
+                        f"💲 *{descripcion}* actualizado a *${nuevo_monto:,.0f}* — ¿en qué categoría va?", token,
+                        reply_markup=_category_keyboard(movement_id))
                 else:
                     await _edit_message(chat_id, message_id,
                         f"✅ Guardado: -${nuevo_monto:,.0f} · {cat.get('emoji','📌')} {cat.get('nombre','?')}", token)
@@ -415,9 +412,8 @@ async def handle_movimiento_callback(
         if token:
             await _answer_callback(callback_id, token)
             await _edit_message(chat_id, message_id,
-                f"📂 ¿A qué categoría movemos *{desc}*?", token)
-            await _send(chat_id, "Elegí categoría:", token, parse_mode="",
-                        reply_markup=_category_keyboard(movement_id))
+                f"📂 ¿A qué categoría movemos *{desc}*?", token,
+                reply_markup=_category_keyboard(movement_id))
         return True
 
     if parts[0] == "del" and len(parts) == 2:
@@ -541,6 +537,15 @@ async def finalizar_pago_tarjeta_unico(
     monto = mov["monto"]
     cat_id = mov.get("categoria_id", 7)
     mes_resumen = mov.get("mes_resumen", date.today().strftime("%Y-%m"))
+    tarjeta_txt = ""
+    if mov.get("tarjeta_id"):
+        t = supabase.table("tarjetas").select("nombre").eq("id", mov["tarjeta_id"]).limit(1).execute()
+        if t.data:
+            tarjeta_txt = f"💳 {t.data[0]['nombre']} · "
+    fecha_txt = ""
+    if mov.get("fecha"):
+        f = str(mov["fecha"])
+        fecha_txt = f" · {f[8:10]}/{f[5:7]}"
 
     async def _notify(text: str, reply_markup: dict | None = None) -> None:
         if message_id is not None:
@@ -551,7 +556,8 @@ async def finalizar_pago_tarjeta_unico(
     if 100 < monto < 1000 and mov.get("moneda") != "USD":
         supabase.table("movimientos").update({"estado": "pendiente_confirmacion"}).eq("id", mov_id).execute()
         await _notify(
-            f"🤔 Registré *${monto:,.0f}* — ¿está bien o querías decir *${monto * 1000:,.0f}*?",
+            f"🤔 *{tarjeta_txt}{mov['descripcion']}*{fecha_txt}: registré *${monto:,.0f}* — "
+            f"¿está bien o querías decir *${monto * 1000:,.0f}*?",
             _monto_keyboard(mov_id, monto),
         )
     elif cat_id == 7 or forzar_categoria:
@@ -561,12 +567,15 @@ async def finalizar_pago_tarjeta_unico(
             cat_name = cat_row.data.get("nombre", "Otros") if cat_row.data else "Otros"
             cat_emoji = cat_row.data.get("emoji", "📌") if cat_row.data else "📌"
             await _notify(
-                f"🤔 Registré *${monto:,.0f}* en *{mov['descripcion']}* — lo clasifiqué como "
-                f"{cat_emoji} {cat_name}, ¿es correcto? Si no, elegí la categoría:"
+                f"🤔 *{tarjeta_txt}{mov['descripcion']}* · *${monto:,.0f}*{fecha_txt}\n"
+                f"Lo clasifiqué como {cat_emoji} {cat_name}. ¿Es correcto? Si no, elegí la categoría:",
+                _category_keyboard(mov_id),
             )
         else:
-            await _notify(f"📌 Guardé *${monto:,.0f}* — ¿en qué categoría va *{mov['descripcion']}*?")
-        await _send(chat_id, "Elegí categoría:", token, parse_mode="", reply_markup=_category_keyboard(mov_id))
+            await _notify(
+                f"📌 *{tarjeta_txt}{mov['descripcion']}* · *${monto:,.0f}*{fecha_txt}\n¿En qué categoría va?",
+                _category_keyboard(mov_id),
+            )
     else:
         supabase.table("movimientos").update({"estado": "confirmado"}).eq("id", mov_id).execute()
         cat_row = supabase.table("categorias").select("nombre, emoji").eq("id", cat_id).single().execute()
