@@ -173,6 +173,18 @@ async def handle_movimiento_callback(
 
     if parts[0] == "cat" and len(parts) == 3:
         movement_id, cat_id = int(parts[1]), int(parts[2])
+        actual = (
+            supabase.table("movimientos").select("estado, descripcion, monto")
+            .eq("id", movement_id).eq("usuario_id", user_id).limit(1).execute()
+        ).data
+        if not actual or actual[0]["estado"] == "anulado":
+            # gasto anulado (ej. duplicado de algo ya cargado): no revivirlo
+            if token:
+                await _answer_callback(callback_id, token)
+                desc = actual[0]["descripcion"] if actual else "ese gasto"
+                await _edit_message(chat_id, message_id,
+                    f"↩️ *{desc}* ya estaba cargado (era un duplicado), no hace falta categorizarlo.", token)
+            return True
         supabase.table("movimientos").update(
             {"categoria_id": cat_id, "estado": "confirmado"}
         ).eq("id", movement_id).eq("usuario_id", user_id).execute()
@@ -182,7 +194,8 @@ async def handle_movimiento_callback(
         mov = supabase.table("movimientos").select("usuario_id, descripcion").eq("id", movement_id).single().execute()
         if token:
             await _answer_callback(callback_id, token)
-            await _edit_message(chat_id, message_id, f"✅ Guardado como {cat_emoji} {cat_name}", token)
+            await _edit_message(chat_id, message_id,
+                f"✅ *{actual[0]['descripcion']}* · ${float(actual[0]['monto']):,.0f} → {cat_emoji} {cat_name}", token)
         if mov.data:
             uid = mov.data["usuario_id"]
             desc = mov.data["descripcion"]
