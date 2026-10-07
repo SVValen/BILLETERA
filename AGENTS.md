@@ -1,142 +1,70 @@
-# Contexto de Proyecto — BILLETERA
-> Leer al inicio de cada sesión de trabajo y antes de ejecutar /review.
+# Contexto de Proyecto — BILLETERA (v2, simple)
+> Leer al inicio de cada sesión de trabajo. Trabajar directo en `main` (proyecto personal, sin ramas).
 
-## Descripción
-Aplicación de finanzas personales con interfaz principal via Telegram bot.
-El usuario registra ingresos, gastos e inversiones mediante comandos y texto libre.
-El dashboard web muestra reportes, categorías, presupuestos, suscripciones e inversiones.
+## Qué es
+Finanzas personales con carga por Telegram y dashboard web. El objetivo de la v2 es ver en la app
+**los mismos datos que la planilla de Excel "Balance Personal"**: una hoja por **mes de pago**, filas
+agrupadas por *grupo* (Sueldo, Cuotas familia, Préstamo, Tarjeta Naranja/Santander/BBVA/MP,
+Alquiler, Efectivo) con rubro, cuota X/N, moneda y débito automático, subtotales y **neto del mes**.
+
+En octubre 2026 se borró todo lo de inversiones (portafolios, RV/RF, colchón, objetivos, resumen
+semanal). La base anterior quedó copiada en el esquema `backup_v1` de Supabase.
 
 ## Stack
-- Next.js (App Router, TypeScript)
-- Supabase (PostgreSQL + Auth)
-- Vercel (hosting)
-- Telegram Bot API (interfaz principal de carga)
-- Python / FastAPI (API del bot — módulos bajo `api/bot/`)
-- Anthropic Claude API (análisis de inversiones — Haiku)
-- GitHub Actions (crons de inversiones — Vercel Free solo permite 1 cron/día)
+- Next.js (App Router, TypeScript) — dashboard
+- Python / FastAPI en funciones de Vercel — bot y endpoints (`api/*.py`, un archivo = una ruta)
+- Supabase (Postgres + Auth). Proyecto `BILLETERA` (ref `tuzrnadpcitcwalmtbnl`)
+- Vercel (cuenta SSValen, Hobby; deploy automático al pushear a `main`) — https://billetera-gamma.vercel.app
+- Telegram Bot API, Groq Whisper (audios)
+- GitHub Actions: `cron-gmail-sync.yml` cada 20 min → `/api/cron?job=gmail_sync`
+- Vercel Cron diario 12:00 UTC → `/api/cron`
 
-## Modelo de datos
-- Usuarios individuales (no multi-tenant de empresas)
-- Movimientos: ingreso o gasto, categoría, monto, fecha, descripción
-- Categorías: con aprendizaje automático de keywords por usuario
-- Recurrentes: gastos/ingresos que se repiten mensualmente
-- Suscripciones: servicios con fecha de vencimiento y monto en USD
-- Presupuestos: límites por categoría con alertas
-- Portafolios: tipo + capital (USD y/o ARS) + % asignación RF + estado_wizard
-- Aportes: historial de aportes de capital por portafolio con tipo de cambio MEP
-- Portafolio_activos: activos RV asignados a cada portafolio con % y monto objetivo
-- Activos (renta variable): crypto via CoinGecko, CEDEARs/acciones via IOL; con RSI, EMA, tendencia
-- Recomendaciones: señales RV generadas por el cron con acción/confianza/razón
-- Decisiones_inversion: respuestas del usuario (aceptar/rechazar) con seguimiento de resultado
-- Instrumentos RF: cauciones, letras, bonos soberanos, ONs con TNA y precios IOL
-- Posiciones RF: posiciones abiertas con monto ARS, equivalente USD en entrada, TNA contratada
-- Tarjeta_pagos: registro mensual del pago de resumen por tarjeta (monto calculado vs. monto realmente pagado)
+## Modelo de datos (v2)
+- `movimientos`: monto (ARS), tipo gasto|ingreso, **grupo**, categoria_id (= rubro), **mes_resumen**
+  (= mes de pago, obligatorio), moneda, monto_original, tipo_cambio, cuota_nro/cuota_total/
+  cuota_plan_id, prestamo_id, debito_automatico, **pagado**, **estimado**, concepto (alquiler),
+  tarjeta_id, es_pago_tarjeta, estado
+  - Trigger `movimientos_set_grupo`: con tarjeta → 'Tarjeta <nombre>'; con préstamo → 'Préstamo'
+  - Montos negativos solo en grupo 'Alquiler' (descuentos por arreglos)
+- `categorias`: rubros del Excel. IDs fijos que usa el código: 7 Otros, 17 Ingresos, 20 Pago Tarjeta, 10 Departamento
+- `tarjetas` (dia_cierre: Naranja 27, MP 5; Santander/BBVA variables, hoy 28), `tarjeta_last4_map`, `tarjeta_pagos`
+- `cuotas_plan`, `prestamos` + `prestamo_cuotas` (cronograma importado completo)
+- `alquiler_contrato` + `alquiler_canon` (canon por período, estimado hasta tener IPC)
+- `cotizaciones` (dólar mayorista BCRA A 3500 por día)
+- `recurrentes`, `presupuestos`, `keywords_aprendidas`, `email_procesados`, `usuario_gmail_config`, `perfiles`
 
-## Comandos del bot (Telegram)
+## Reglas de negocio
+- `usuario_id` = Telegram ID; filtro manual en cada query (service role, sin RLS efectiva)
+- Nunca borrar movimientos: `estado='anulado'`
+- La planilla y los totales del mes se arman por `mes_resumen`, excluyendo `es_pago_tarjeta`
+- Dólares: se guardan en pesos al **dólar BCRA** con `moneda='USD'`, `monto_original`, `tipo_cambio`
+- Montos ≤ 100 sin moneda → el bot pregunta USD / pesos / miles
+- Alquiler: se paga del 1 al 10, por adelantado; las expensas del mes son la **liquidación del mes
+  anterior**. A cargo del inquilino: total de su fila − expensas extraordinarias. Agua y gas van aparte
+- Ajuste del alquiler cada 4 meses por IPC (primer ajuste: diciembre 2026). Criterio: variación del
+  IPC de los 4 meses anteriores ya publicados (dic → IPC oct / IPC jun)
+- Sueldo UTN: lo calcula la tarea programada "Sueldo UTN desde planilla FAGDUT" (no es código del repo)
 
-### Finanzas personales
-| Comando / Texto | Acción |
+## Bot (Telegram)
+| Texto / comando | Acción |
 |---|---|
-| `5000 comida` / `gasté 3000 nafta` | Registrar gasto |
-| `sueldo 80000` / `ingreso 50000 freelance` | Registrar ingreso |
-| `100 dolares supermercado` | Gasto en USD (convierte al oficial) |
-| `40000 internet todos los 1 del mes` | Configurar recurrente mensual |
-| `150000 tele 12 cuotas` / `cuota 2/3 ...` | Cuotas (inicio o en progreso) |
-| `/editar [query]` | Editar movimiento reciente |
-| `/borrar [query]` | Borrar (anular) movimiento reciente |
-| `/presupuesto` | Ver estado de presupuestos |
-| `/presupuesto comida 20000` | Fijar presupuesto mensual |
-| `/recurrentes` | Ver gastos recurrentes activos |
+| `5000 comida`, `sueldo 80000` | Gasto / ingreso (pregunta medio de pago si hay tarjetas) |
+| `20 claude`, `100 usd x` | ≤ 100 pregunta moneda; con "usd" convierte al dólar BCRA |
+| `150000 tele 12 cuotas`, `cuota 2/3 …` | Compra en cuotas |
+| `40000 internet todos los 1` | Recurrente |
+| `/alquiler [YYYY-MM]` | Alquiler, expensas, agua, gas y descuentos del mes, con botones de pago |
+| `descuento 28500 ducha` | Descuento del alquiler del mes |
+| PDF de expensas | Lee la fila del inquilino y carga expensas/agua/gas |
+| `/tarjetas`, `/tarjeta_nueva`, `/pagar_tarjeta` | Tarjetas y pago de resumen |
+| `/prestamos` | Cuotas de préstamo |
+| `/presupuesto`, `/recurrentes`, `/editar`, `/borrar`, `/id`, `/ayuda` | Utilidades |
 
-### Tarjetas de crédito
-| Comando / Texto | Acción |
-|---|---|
-| `/tarjeta_nueva` | Wizard con botones: nombre → día de cierre |
-| `/tarjetas` | Lista tarjetas activas con día de cierre |
-| `/colchon_nuevo` | Crea portafolio colchón de tarjetas |
-| `/colchon` | Estado del mes: cuotas comprometidas, tope variable, invertido, gastado |
-| `/pagar_tarjeta` | Calcula lo que corresponde pagar este mes por tarjeta (cuotas + compras en 1 pago); permite corregir el monto y registra el pago |
+## Mails (Gmail IMAP)
+Santander (`lib/email_parser_santander.py`) y Naranja X (`lib/email_parser_naranja.py`).
 
-### Portafolios e inversiones
-| Comando / Texto | Acción |
-|---|---|
-| `/portafolio_nuevo` | Wizard guiado para crear portafolio |
-| `/mis_portafolios` | Ver portafolios activos con capital (USD + ARS) |
-| `/activos` | Elegir qué activos RV monitorear (toggles ✅/⬜ por portafolio) |
-| `/inversiones` | Señales RV pendientes + carry trade + opciones RF |
-| `/inversiones reset` | Cancelar wizard de portafolio en progreso |
-| `/portafolio` | Distribución de activos RV y P&L del portafolio |
-| `/precios` | Cotizaciones en tiempo real (crypto + dólar + activos) |
-| `/como_funciona` | Explicación de señales RSI/EMA |
-| `sumé 500 USD al conservador` | Aporte de capital USD a portafolio |
-| `agregué 200000 pesos` | Aporte de capital ARS a portafolio |
-| `deposité 1000 USD` | Aporte (heurística: >50k sin moneda → ARS) |
+## Variables de entorno (nunca en cliente)
+`SUPABASE_SERVICE_ROLE_KEY`, `TELEGRAM_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, `CRON_SECRET`, `GROQ_API_KEY`
 
-### Renta fija
-| Comando / Texto | Acción |
-|---|---|
-| `/opciones_rf` | Instrumentos disponibles con botones para registrar posición |
-| `/liquidez` | Carry trade + posiciones abiertas + P&L en USD |
-| `puse 500000 en caución 7 días` | Registrar posición RF directamente |
-| `AL30 200000` | Registrar bono soberano |
-| `lecap 300000 S28F6` | Registrar letra |
-
-### Utilidades
-| Comando | Acción |
-|---|---|
-| `/ayuda` / `/start` | Guía rápida |
-| `/id` | Telegram ID para vincular con el dashboard |
-| `/iol_debug TICKER` | Debug de datos de mercado IOL |
-
-## Flujos críticos
-1. **Registro de gasto/ingreso**: usuario envía texto → parser detecta monto+descripción → categorización automática → inserta movimiento
-2. **Categorización automática**: keyword matching (hardcoded + aprendidas por usuario) → sugiere categoría → usuario confirma con botón
-3. **Dashboard mensual**: suma ingresos/gastos por categoría con filtro de mes
-4. **Conversión USD**: gastos en USD se convierten a ARS (tipo de cambio oficial); descripción queda con `(USD X @ $Y oficial)`
-5. **Wizard de portafolio**: `/portafolio_nuevo` → tipo → objetivo → plazo/renta → capital → % RF (0-100% libre, ✨ = recomendado) → nombre → activo. Al activar: si RF% > 0 sugiere instrumentos RF; si RV% > 0 sugiere activos RV con toggles (Claude elige 2-4 según perfil, pre-seleccionados en `portafolio_activos`).
-6. **Aporte de capital**: `sumé X USD/ARS` → detecta portafolio destino (por hint o botones si múltiple) → confirma → actualiza `capital_usd` o `capital_ars` con concurrencia optimista → guarda en `aportes_portafolio` con tipo de cambio MEP → sugiere instrumentos RF para la parte RF del aporte
-7. **Registro de gasto con tarjeta**: gasto parseado → si usuario tiene tarjetas → guarda `pendiente_tarjeta` → botones [Efectivo][Naranja][Santander]… → callback `pago_tar` → aplica `tarjeta_id`, `fecha_compra`, `mes_resumen=calcular_mes_resumen(hoy, dia_cierre)` → confirma
-8. **Cuotas con tarjeta**: `_registrar_cuota_plan` → si hay tarjetas → botones de tarjeta (sin Efectivo) → `cuota_tar` callback → actualiza `cuotas_plan.tarjeta_id` → pregunta fecha → `_create_cuota_movimientos` propaga `tarjeta_id` + `mes_resumen` a cada cuota
-9. **Colchón de tarjetas** (`/colchon`): muestra comprometido (cuotas fijas) + tope variable + total necesario + invertido (posiciones RF del portafolio colchón) + gastado variable. Si sin tope: llama a Claude con historial (≥2 meses) o pide monto directamente. Alerta de exceso se dispara al registrar un gasto variable que supera el tope.
-9b. **Pago de resumen de tarjeta** (`/pagar_tarjeta`): para cada tarjeta activa, suma cuotas + compras en 1 pago con `mes_resumen` = mes actual (excluyendo pagos ya registrados) → botones [Confirmar monto calculado][Editar monto] → al confirmar inserta un movimiento gasto `es_pago_tarjeta=TRUE` (categoría "Pago Tarjeta") y un registro en `tarjeta_pagos` (upsert por usuario+tarjeta+mes). El gasto original (categorizado) y el pago del resumen son movimientos independientes — esto es intencional: permite comparar gasto por categoría mes a mes y, por separado, trackear el flujo de caja real de cada pago de tarjeta.
-10. **Selección de activos RV** (`/activos`): muestra todos los activos disponibles con toggles ✅/⬜; cada tap persiste directo en `portafolio_activos` (insert/delete); el cron empieza a monitorear inmediatamente; también se lanza automáticamente al activar un portafolio con RV% > 0.
-11. **Registro RF con botones**: `/opciones_rf` o sugerencia post-wizard/post-aporte → botón instrumento → calcula capital RF = `(capital_usd * MEP + capital_ars) * rf_pct / 100` → opciones 25/50/75/100% → confirmar → inserta en `posiciones_rf`
-12. **Cron RV (cada ~30 min)**: actualiza precios + RSI/EMA → genera recomendaciones si hay señal → envía por Telegram con botones [Aceptar][Rechazar]
-13. **Cron RF (L-V 15:00 UTC)**: actualiza TNA/precios RF → evalúa carry trade → alerta vencimientos → sugiere rotación RF↔RV
-
-## Reglas de negocio invariantes
-- Cada movimiento / posición / portafolio pertenece a un único usuario (filtro manual por `usuario_id`)
-- Bot debe responder en menos de 3 segundos (Telegram timeout)
-- Nunca eliminar movimientos: marcar como `estado='anulado'`
-- El balance siempre se calcula con filtro de fecha y usuario
-- Capital en `portafolios`: `capital_usd` (USD) y `capital_ars` (ARS) separados; para allocation se suman convertidos al MEP
-- `portafolios.proposito`: solo `NULL | 'colchon_tarjetas'` — el colchón es un conservador con propósito específico
-- `tarjetas.dia_cierre`: NULL mientras wizard pendiente; una tarjeta sin dia_cierre no aparece en los botones de pago
-- `movimientos.mes_resumen`: calculado automáticamente según `dia_cierre` de la tarjeta; NULL para gastos en efectivo
-- `posiciones_rf.estado`: solo `abierta | cerrada | vencida` (no `activa` ni `rescatada`)
-- Gastos "variables" con tarjeta: movimientos con `tarjeta_id IS NOT NULL` y descripción sin patrón `(cuota X/N)`; se suman contra `colchon_mensual.tope_variable`
-- `movimientos.es_pago_tarjeta`: TRUE solo en el movimiento que representa el pago del resumen (creado por `/pagar_tarjeta`); FALSE en todas las compras. El resumen de gastos por tarjeta (`mes_resumen`) excluye siempre `es_pago_tarjeta=TRUE` para no contarse a sí mismo
-- `tarjeta_pagos`: una fila por usuario+tarjeta+mes_resumen (UNIQUE); `monto_pagado IS NULL` mientras el usuario está respondiendo el monto real por texto (estado transitorio, igual patrón que `colchon_mensual`)
-- Posiciones RF: `monto_usd_entrada` es NOT NULL — requiere dólar MEP disponible al registrar
-- `portafolios.tipo`: solo `conservador | pasivo | crecimiento | oportunista` (CHECK constraint)
-- Aportes registran tipo de cambio MEP del momento para trazabilidad
-- Carry trade: TNA/12 > devaluación MEP mensual → conviene ARS; caso contrario → USD
-- El cron RV solo genera señales para activos en `portafolio_activos`; sin filas → 0 señales RV
-- Activos disponibles para monitoreo: BTC, ETH, AAPL, GOOGL, MSFT, GGAL, YPFD (excluye tipo `dolar`)
-
-## Consideraciones de seguridad específicas
-- Webhook de Telegram valida que el request viene de Telegram (token en URL)
-- `user_id` de Telegram mapeado al `user_id` de Supabase de forma segura
-- No exponer datos financieros del usuario en logs
-- API Routes del dashboard verifican sesión antes de devolver datos
-- `CRON_SECRET` requerido en cron RF (siempre); cron RV también lo verifica
-
-## Variables de entorno críticas (nunca en cliente)
-- `SUPABASE_SERVICE_ROLE_KEY`
-- `TELEGRAM_BOT_TOKEN`
-- `ANTHROPIC_API_KEY`
-- `IOL_USER` / `IOL_PASSWORD`
-- `CRON_SECRET`
-
-## Reportes de revisión
-`.claude/reports/review-[YYYY-MM-DD]-[HH-MM].md`
+## Migraciones
+Archivos `schema_v2_*.sql`. Las migraciones desde el conector de Supabase se cancelan: correrlas en el
+SQL Editor. Los `schema_*.sql` anteriores son históricos (v1).
