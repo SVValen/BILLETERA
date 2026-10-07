@@ -31,6 +31,7 @@ semanal). La base anterior quedó copiada en el esquema `backup_v1` de Supabase.
 - `cuotas_plan`, `prestamos` + `prestamo_cuotas` (cronograma importado completo)
 - `alquiler_contrato` + `alquiler_canon` (canon por período, estimado hasta tener IPC)
 - `cotizaciones` (dólar mayorista BCRA A 3500 por día)
+- `familiares` + `familia_asignaciones` (qué compra/plan le corresponde a cada familiar y cuánto por mes)
 - `recurrentes`, `presupuestos`, `keywords_aprendidas`, `email_procesados`, `usuario_gmail_config`, `perfiles`
 
 ## Reglas de negocio

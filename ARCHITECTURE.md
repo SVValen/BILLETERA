@@ -10,6 +10,7 @@
 - `movements.py` — lista/filtros/recategorización
 - `alquiler.py` — GET `?mes=`; POST `{resource: pagar|pagar_mes|descuento}`
 - `prestamos.py` — GET `?resource=prestamos|prestamos_mes|prestamo_cuotas`; POST `{resource: importar_prestamo|pagar_cuota}`
+- `familia.py` — GET `?mes=` (lo que debe cada familiar + compras sin asignar); POST `{resource: familiar|asignar|desasignar}`
 - `cuotas.py`, `recurrentes.py`, `presupuestos.py` (también categorías)
 
 ## Librerías (`lib/`)
@@ -28,7 +29,7 @@ Handlers: movimientos, cuotas, recurrentes, tarjetas, prestamos, presupuestos, t
 alquiler, expensas. Callbacks: `callbacks/movimiento_callbacks.py` (incluye `mon:` para la moneda).
 
 ## Dashboard (`app/dashboard/`)
-Tabs: Inicio, **Planilla del mes** (vista Excel), Detalle mensual (tarjetas, préstamo, alquiler con
+Tabs: Inicio, **Planilla del mes** (vista Excel), **Cuotas familia** (detalle por familiar + mensaje para WhatsApp), Detalle mensual (tarjetas, préstamo, alquiler con
 botones de pago, cuotas, recurrentes), Presupuestos, Movimientos, Categorías, Préstamos.
 Todo client-side con `fetchWithAuth` (JWT de Supabase → `lib/auth.py`).
 

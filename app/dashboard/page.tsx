@@ -6,17 +6,19 @@ import { createSupabaseBrowser } from '@/lib/supabase-browser'
 import { BilleteraButton } from '@/app/components/design'
 import InicioTab from './InicioTab'
 import PlanillaTab from './PlanillaTab'
+import FamiliaTab from './FamiliaTab'
 import DetalleMensualTab from './DetalleMensualTab'
 import PresupuestosTab from './PresupuestosTab'
 import MovimientosTab from './MovimientosTab'
 import PrestamosTab from './PrestamosTab'
 import CategoriasTab from './CategoriasTab'
 
-type Tab = 'inicio' | 'planilla' | 'detalle' | 'presupuestos' | 'movimientos' | 'prestamos' | 'categorias'
+type Tab = 'inicio' | 'planilla' | 'familia' | 'detalle' | 'presupuestos' | 'movimientos' | 'prestamos' | 'categorias'
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'inicio', label: 'Inicio' },
   { id: 'planilla', label: 'Planilla del mes' },
+  { id: 'familia', label: 'Cuotas familia' },
   { id: 'detalle', label: 'Detalle mensual' },
   { id: 'presupuestos', label: 'Presupuestos' },
   { id: 'movimientos', label: 'Movimientos' },
@@ -69,7 +71,7 @@ export default function Dashboard() {
     return <div className="auth-page"><p style={{ color: '#aaa' }}>Verificando sesión...</p></div>
   }
 
-  const showMes = tab === 'inicio' || tab === 'planilla' || tab === 'detalle' || tab === 'presupuestos' || tab === 'movimientos'
+  const showMes = tab === 'inicio' || tab === 'planilla' || tab === 'familia' || tab === 'detalle' || tab === 'presupuestos' || tab === 'movimientos'
 
 
   return (
@@ -108,6 +110,7 @@ export default function Dashboard() {
       <div className="page">
         {tab === 'inicio' && <InicioTab mes={mes} />}
         {tab === 'planilla' && <PlanillaTab mes={mes} />}
+        {tab === 'familia' && <FamiliaTab mes={mes} />}
         {tab === 'detalle' && <DetalleMensualTab mes={mes} />}
         {tab === 'presupuestos' && <PresupuestosTab mes={mes} />}
         {tab === 'movimientos' && <MovimientosTab mes={mes} />}
