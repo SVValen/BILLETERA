@@ -68,6 +68,29 @@ async def _procesar_recurrentes(hoy: date, token: str) -> int:
     return enviados
 
 
+async def _ajustes_ipc(token: str) -> int:
+    """Calcula el ajuste por IPC del alquiler cuando ya están los datos, y avisa."""
+    from lib import alquiler as alq
+    contratos = get_supabase().table("alquiler_contrato").select("usuario_id").eq("activo", True).execute()
+    aplicados = 0
+    for c in (contratos.data or []):
+        aj = await alq.actualizar_ajuste_ipc(c["usuario_id"])
+        if not aj:
+            continue
+        aplicados += 1
+        try:
+            await _send_telegram(
+                int(c["usuario_id"]),
+                f"🏠 *Ajuste del alquiler desde {aj['mes']}*\n\n"
+                f"${aj['monto_anterior']:,.0f} → *${aj['monto']:,.0f}* ({aj['variacion'] * 100:+.2f}%)\n"
+                f"_{aj['detalle']}_\n\nYa actualicé los alquileres de ese período.",
+                token,
+            )
+        except Exception:
+            pass
+    return aplicados
+
+
 def _asegurar_alquileres(hoy: date) -> int:
     """Crea como pendientes los conceptos de alquiler del mes en curso y del próximo."""
     from lib import alquiler as alq
@@ -102,6 +125,7 @@ async def cron_job(request: Request, job: str = ""):
     dolar_bcra = await actualizar_cotizacion()
     rec_enviados = await _procesar_recurrentes(hoy, token)
     alquiler_creados = _asegurar_alquileres(hoy)
+    ajustes = await _ajustes_ipc(token)
 
     return JSONResponse({
         "ok": True,
@@ -109,4 +133,5 @@ async def cron_job(request: Request, job: str = ""):
         "recordatorios": rec_enviados,
         "alquiler_conceptos_creados": alquiler_creados,
         "dolar_bcra": dolar_bcra,
+        "ajustes_ipc": ajustes,
     })

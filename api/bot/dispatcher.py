@@ -13,6 +13,7 @@ from .handlers.tarjetas import (
 )
 from .handlers.recurrentes import handle_recurrente_text
 from .handlers.transferencias import handle_transferencia_text
+from .handlers.expensas import handle_documento
 from .handlers.alquiler import handle_alquiler_cmd, handle_alquiler_callback, handle_descuento_text
 from .handlers.prestamos import handle_prestamo_callback, handle_prestamos_cmd, detect_prestamo_text
 
@@ -42,6 +43,11 @@ async def dispatch_message(message: dict, token: str) -> None:
     user_id = str(message["from"]["id"])
     chat_id = message["chat"]["id"]
     text = ""
+
+    # ── PDF (liquidación de expensas) ──
+    if "document" in message and token:
+        if await handle_documento(message, user_id, chat_id, token):
+            return
 
     # ── Audio / voz ──
     if "voice" in message or "audio" in message:

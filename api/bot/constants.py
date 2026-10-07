@@ -33,7 +33,8 @@ AYUDA = (
 
     "🏠 *Alquiler:*\n"
     "  `/alquiler` — alquiler, expensas, agua y gas del mes, con botones para marcar pagos\n"
-    "  `descuento 28500 ducha` — descontar un arreglo del alquiler del mes\n\n"
+    "  `descuento 28500 ducha` — descontar un arreglo del alquiler del mes\n"
+    "  📄 Mandame el PDF de la liquidación de expensas y cargo expensas, agua y gas\n\n"
 
     "🏦 *Préstamos:*\n"
     "  `/prestamos` — ver estado del préstamo y pagar cuotas\n"
