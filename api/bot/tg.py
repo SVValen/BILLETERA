@@ -67,11 +67,7 @@ async def _transcribe_voice(file_id: str, token: str) -> str | None:
 
 
 async def _get_dolar_oficial() -> float | None:
-    try:
-        async with httpx.AsyncClient(timeout=5) as client:
-            r = await client.get("https://dolarapi.com/v1/dolares/oficial")
-            if r.status_code == 200:
-                return float(r.json()["venta"])
-    except Exception:
-        pass
-    return None
+    """Dólar para convertir gastos en USD: mayorista BCRA (Com. A 3500), con
+    fallback al oficial de dolarapi. Ver lib/cotizacion.py."""
+    from lib.cotizacion import get_dolar
+    return await get_dolar()

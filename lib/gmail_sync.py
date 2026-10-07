@@ -26,7 +26,8 @@ from lib.email_parser_santander import (
     identificar_tipo_email, parse_email,
     TIPO_DEBITO_AUTOMATICO, TIPO_PAGO_1_PAGO, TIPO_PAGO_CUOTAS, TIPO_PAGO_DEBITO, TIPO_TRANSFERENCIA,
 )
-from api.bot.tg import _send, _get_dolar_oficial
+from api.bot.tg import _send
+from lib.cotizacion import get_dolar, campos_usd
 from api.bot.keyboards import _cuota_fecha_keyboard
 from api.bot.helpers import _categorize
 from api.bot.handlers.movimientos import _save_and_confirm
@@ -150,6 +151,15 @@ async def _procesar_parsed(usuario_id: str, tipo: str, parsed: dict, token: str)
         mes_resumen = calcular_mes_resumen(hoy, dia_cierre) if dia_cierre else hoy.strftime("%Y-%m")
         categoria_id = await _categorize(parsed["descripcion"], usuario_id)
 
+        # Compras / débitos automáticos en dólares (ej. "Monto U$S 20,00"):
+        # se guardan en pesos al dólar BCRA, con el monto original en USD.
+        usd: dict = {}
+        if parsed.get("moneda") == "USD":
+            tasa = await get_dolar()
+            if not tasa:
+                return False, None, None  # reintentar en el próximo poll
+            usd = campos_usd(parsed["monto"], tasa)
+
         if tipo in (TIPO_PAGO_1_PAGO, TIPO_DEBITO_AUTOMATICO):
             ins = supabase.table("movimientos").insert({
                 "usuario_id": usuario_id,
@@ -163,6 +173,8 @@ async def _procesar_parsed(usuario_id: str, tipo: str, parsed: dict, token: str)
                 "estado": "pendiente_tarjeta",
                 "tarjeta_id": tarjeta_id,
                 "mes_resumen": mes_resumen,
+                "debito_automatico": tipo == TIPO_DEBITO_AUTOMATICO,
+                **usd,
             }).execute()
             mov_id = ins.data[0]["id"] if ins.data else None
             if not mov_id:
@@ -174,11 +186,13 @@ async def _procesar_parsed(usuario_id: str, tipo: str, parsed: dict, token: str)
 
         # TIPO_PAGO_CUOTAS — el monto del mail es el total de la compra
         num_cuotas = parsed["num_cuotas"]
-        monto_cuota = round(parsed["monto"] / num_cuotas, 2)
+        monto_total = usd.get("monto", parsed["monto"])
+        monto_cuota = round(monto_total / num_cuotas, 2)
         ins = supabase.table("cuotas_plan").insert({
             "usuario_id": usuario_id,
             "descripcion": parsed["descripcion"],
-            "monto_total": parsed["monto"],
+            "moneda": parsed.get("moneda", "ARS"),
+            "monto_total": monto_total,
             "monto_cuota": monto_cuota,
             "num_cuotas": num_cuotas,
             "cuota_inicio": 1,
@@ -220,19 +234,20 @@ async def _procesar_parsed(usuario_id: str, tipo: str, parsed: dict, token: str)
     # registra como efectivo (no tiene resumen mensual ni tarjeta asociada).
     monto = parsed["monto"]
     descripcion = parsed["descripcion"]
+    extra: dict | None = None
     if parsed["moneda"] == "USD":
-        tasa = await _get_dolar_oficial()
+        tasa = await get_dolar()
         if not tasa:
             return False, None, None
-        descripcion = f"{descripcion} (USD {monto:,.0f} @ ${tasa:,.0f} oficial)"
-        monto = round(monto * tasa)
+        extra = campos_usd(monto, tasa)
+        monto = extra["monto"]
 
-    monto_bajo = monto < 1000
+    monto_bajo = monto < 1000 and not extra
     movement_id = await _save_and_confirm(
         chat_id=chat_id, token=token, user_id=usuario_id,
         descripcion=descripcion, monto=monto, tipo="gasto",
         estado="pendiente_confirmacion" if monto_bajo else "confirmado",
-        nota_monto_bajo=monto_bajo, fecha=parsed["fecha"],
+        nota_monto_bajo=monto_bajo, fecha=parsed["fecha"], extra=extra,
     )
     return True, movement_id, None
 

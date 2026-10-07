@@ -98,6 +98,8 @@ async def cron_job(request: Request, job: str = ""):
         return JSONResponse({"ok": True, **stats})
 
     hoy = date.today()
+    from lib.cotizacion import actualizar_cotizacion
+    dolar_bcra = await actualizar_cotizacion()
     rec_enviados = await _procesar_recurrentes(hoy, token)
     alquiler_creados = _asegurar_alquileres(hoy)
 
@@ -106,4 +108,5 @@ async def cron_job(request: Request, job: str = ""):
         "fecha": hoy.isoformat(),
         "recordatorios": rec_enviados,
         "alquiler_conceptos_creados": alquiler_creados,
+        "dolar_bcra": dolar_bcra,
     })

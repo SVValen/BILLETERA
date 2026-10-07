@@ -6,6 +6,7 @@ from ..tg import _send, _get_dolar_oficial
 from ..keyboards import _monto_keyboard, _category_keyboard
 from ..helpers import _detect_currency, _categorize, _save_learned_keywords
 from ..constants import AYUDA
+from lib.cotizacion import campos_usd
 from .presupuestos import _check_presupuesto_alert
 from .recurrentes import _registrar_recurrente
 from .cuotas import _registrar_cuota_plan
@@ -22,6 +23,7 @@ async def _save_pending_tarjeta(
     tipo: str,
     tarjetas: list[dict],
     fecha: str | None = None,
+    extra: dict | None = None,
 ) -> None:
     """Guarda un gasto en estado pendiente_tarjeta y muestra botones de medio de pago."""
     categoria_id = await _categorize(descripcion, user_id)
@@ -36,6 +38,7 @@ async def _save_pending_tarjeta(
         "tipo": tipo,
         "origen": "telegram",
         "estado": "pendiente_tarjeta",
+        **(extra or {}),
     }).execute()
 
     mov_id = result.data[0]["id"] if result.data else None
@@ -62,6 +65,7 @@ async def _save_and_confirm(
     estado: str = "confirmado",
     nota_monto_bajo: bool = False,
     fecha: str | None = None,
+    extra: dict | None = None,
 ) -> int | None:
     categoria_id = 17 if tipo == "ingreso" else await _categorize(descripcion, user_id)
 
@@ -75,6 +79,8 @@ async def _save_and_confirm(
         "tipo": tipo,
         "origen": "telegram",
         "estado": estado,
+        "mes_resumen": (fecha or date.today().isoformat())[:7],
+        **(extra or {}),
     }).execute()
 
     movement_id = result.data[0]["id"] if result.data else None
@@ -109,6 +115,39 @@ async def _save_and_confirm(
         )
 
     return movement_id
+
+
+async def _ask_moneda(*, chat_id: int, token: str, user_id: str,
+                      descripcion: str, monto: float, tipo: str) -> None:
+    """Guarda el movimiento como pendiente_moneda y pregunta si son USD, pesos o miles."""
+    categoria_id = 17 if tipo == "ingreso" else await _categorize(descripcion, user_id)
+    hoy = date.today().isoformat()
+    r = get_supabase().table("movimientos").insert({
+        "usuario_id": user_id,
+        "fecha": hoy,
+        "fecha_compra": hoy,
+        "descripcion": descripcion,
+        "monto": monto,
+        "categoria_id": categoria_id,
+        "tipo": tipo,
+        "origen": "telegram",
+        "estado": "pendiente_moneda",
+    }).execute()
+    mov_id = r.data[0]["id"] if r.data else None
+    if not mov_id:
+        await _send(chat_id, "Error guardando el movimiento 😕", token, parse_mode="")
+        return
+    m = f"{monto:,.2f}".rstrip("0").rstrip(".")
+    await _send(
+        chat_id,
+        f"💵 *{m} {descripcion}* — ¿son dólares o pesos?",
+        token,
+        reply_markup={"inline_keyboard": [
+            [{"text": f"💵 USD {m}", "callback_data": f"mon:{mov_id}:usd"}],
+            [{"text": f"$ {m} pesos", "callback_data": f"mon:{mov_id}:ars"},
+             {"text": f"$ {monto * 1000:,.0f}", "callback_data": f"mon:{mov_id}:mil"}],
+        ]},
+    )
 
 
 async def _process_text(text: str, user_id: str, chat_id: int, token: str) -> None:
@@ -178,14 +217,20 @@ async def _process_text(text: str, user_id: str, chat_id: int, token: str) -> No
 
     # ── Flujo normal ──
     moneda = _detect_currency(text)
+    extra: dict | None = None
     if moneda == "USD":
         tasa = await _get_dolar_oficial()
         if not tasa:
             await _send(chat_id, "No pude obtener el tipo de cambio 😕 Intentá de nuevo.", token, parse_mode="")
             return
-        monto_ars = round(monto * tasa)
-        descripcion = f"{descripcion} (USD {monto:,.0f} @ ${tasa:,.0f} oficial)"
-        monto = monto_ars
+        extra = campos_usd(monto, tasa)
+        await _send(chat_id, f"💵 USD {monto:,.2f} × ${tasa:,.2f} (BCRA) = *${extra['monto']:,.0f}*", token)
+        monto = extra["monto"]
+    elif monto <= 100:
+        # Montos chicos sin moneda: casi siempre son dólares (suscripciones). Preguntar.
+        await _ask_moneda(chat_id=chat_id, token=token, user_id=user_id,
+                          descripcion=descripcion, monto=monto, tipo=tipo)
+        return
 
     # Para gastos: preguntar medio de pago si el usuario tiene tarjetas configuradas
     if tipo == "gasto":
@@ -194,14 +239,14 @@ async def _process_text(text: str, user_id: str, chat_id: int, token: str) -> No
             await _save_pending_tarjeta(
                 chat_id=chat_id, token=token, user_id=user_id,
                 descripcion=descripcion, monto=monto, tipo=tipo,
-                tarjetas=tarjetas,
+                tarjetas=tarjetas, extra=extra,
             )
             return
 
-    monto_bajo = monto < 1000
+    monto_bajo = monto < 1000 and not extra
     await _save_and_confirm(
         chat_id=chat_id, token=token, user_id=user_id,
         descripcion=descripcion, monto=monto, tipo=tipo,
         estado="pendiente_confirmacion" if monto_bajo else "confirmado",
-        nota_monto_bajo=monto_bajo,
+        nota_monto_bajo=monto_bajo, extra=extra,
     )

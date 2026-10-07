@@ -17,8 +17,8 @@ async def _registrar_recurrente(
             await _send(chat_id, "No pude obtener el tipo de cambio 😕 Intentá de nuevo.", token, parse_mode="")
             return
         desc_limpia = re.sub(r"^(?:usd|dolar|dólares?)\s+", "", descripcion, flags=re.IGNORECASE).strip()
-        monto = round(monto * tasa)
-        descripcion = f"{desc_limpia} (USD @ ${tasa:,.0f} oficial)"
+        descripcion = f"{desc_limpia} (USD {monto:,.2f})"
+        monto = round(monto * tasa, 2)
 
     categoria_id = await _categorize(descripcion, user_id)
     supabase = get_supabase()
@@ -30,6 +30,7 @@ async def _registrar_recurrente(
         "tipo": tipo,
         "dia_del_mes": dia_mes,
         "activo": True,
+        "moneda": moneda,
     }).execute()
     sufijo = {1: "ro", 2: "do", 3: "ro"}.get(dia_mes, "to")
     await _send(chat_id,

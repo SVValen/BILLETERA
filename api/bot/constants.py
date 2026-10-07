@@ -10,9 +10,10 @@ AYUDA = (
     "  `sueldo 80000`\n"
     "  `ingreso 50000 freelance`\n\n"
 
-    "💵 *En dólares* — convertidos al oficial:\n"
+    "💵 *En dólares* — al dólar BCRA (mayorista A 3500):\n"
     "  `100 dolares supermercado`\n"
-    "  `2.49 usd spotify`\n\n"
+    "  `2.49 usd spotify`\n"
+    "  _Si mandás un monto de 100 o menos sin moneda, te pregunto si son dólares._\n\n"
 
     "🔁 *Gasto recurrente* — recordatorio mensual:\n"
     "  `40000 internet todos los 1 del mes`\n"

@@ -44,6 +44,10 @@ async def _create_cuota_movimientos(plan_id: int, primer_fecha: date, token: str
             "tipo": "gasto",
             "origen": "telegram",
             "estado": "confirmado",
+            "cuota_nro": cuota_inicio + i,
+            "cuota_total": p["num_cuotas"],
+            "cuota_plan_id": plan_id,
+            "moneda": p.get("moneda") or "ARS",
         }
         if tarjeta_id:
             row["tarjeta_id"] = tarjeta_id
@@ -85,8 +89,8 @@ async def _registrar_cuota_plan(
             await _send(chat_id, "No pude obtener el tipo de cambio 😕 Intentá de nuevo.", token, parse_mode="")
             return
         desc_limpia = re.sub(r"^(?:usd|dolar|dólares?)\s+", "", descripcion, flags=re.IGNORECASE).strip()
-        monto = round(monto * tasa)
-        descripcion = f"{desc_limpia} (USD @ ${tasa:,.0f} oficial)"
+        descripcion = f"{desc_limpia} (USD {monto:,.2f})"
+        monto = round(monto * tasa, 2)
 
     monto_cuota = round(monto / num_cuotas, 2)
     categoria_id = await _categorize(descripcion, user_id)
@@ -99,6 +103,7 @@ async def _registrar_cuota_plan(
         "num_cuotas": num_cuotas,
         "cuota_inicio": cuota_actual,
         "categoria_id": categoria_id,
+        "moneda": moneda,
     }).execute()
     plan_id = result.data[0]["id"] if result.data else None
     if not plan_id:

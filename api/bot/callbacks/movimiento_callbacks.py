@@ -36,7 +36,8 @@ async def handle_movimiento_callback(
             # Efectivo: mes_resumen = mes de la compra, finalizar directo
             updates["mes_resumen"] = hoy.strftime("%Y-%m")
             monto = mov["monto"]
-            monto_bajo = monto < 1000
+            # ≤ 100 ya se preguntó (¿USD, pesos o miles?) al cargarlo; acá solo 101-999
+            monto_bajo = 100 < monto < 1000 and mov.get("moneda") != "USD"
             cat_id = mov.get("categoria_id", 7)
             if monto_bajo:
                 updates["estado"] = "pendiente_confirmacion"
@@ -192,6 +193,58 @@ async def handle_movimiento_callback(
                 await _check_presupuesto_alert(
                     usuario_id=uid, categoria_id=cat_id, chat_id=chat_id, token=token
                 )
+        return True
+
+    # ── Moneda de un monto chico (≤ 100): mon:{id}:usd|ars|mil ──
+    if parts[0] == "mon" and len(parts) == 3:
+        from lib.cotizacion import get_dolar, campos_usd
+        from ..handlers.tarjetas import get_tarjetas_activas, pago_keyboard
+        mov_id = int(parts[1])
+        opcion = parts[2]
+        mov_r = supabase.table("movimientos").select("*").eq("id", mov_id).eq("usuario_id", user_id).single().execute()
+        if not mov_r.data or mov_r.data.get("estado") != "pendiente_moneda":
+            if token:
+                await _answer_callback(callback_id, token)
+            return True
+        mov = mov_r.data
+        monto_raw = float(mov["monto"])
+        updates: dict = {}
+        if opcion == "usd":
+            tasa = await get_dolar()
+            if not tasa:
+                if token:
+                    await _answer_callback(callback_id, token, "No pude obtener el dólar, probá de nuevo")
+                return True
+            updates.update(campos_usd(monto_raw, tasa))
+        elif opcion == "mil":
+            updates["monto"] = monto_raw * 1000
+        nuevo = float(updates.get("monto", monto_raw))
+        detalle_usd = f" (USD {monto_raw:,.2f} × ${updates['tipo_cambio']:,.2f})" if opcion == "usd" else ""
+
+        tarjetas = get_tarjetas_activas(user_id) if mov["tipo"] == "gasto" else []
+        if tarjetas:
+            updates["estado"] = "pendiente_tarjeta"
+            supabase.table("movimientos").update(updates).eq("id", mov_id).execute()
+            if token:
+                await _answer_callback(callback_id, token)
+                await _edit_message(chat_id, message_id,
+                    f"💳 *${nuevo:,.0f}{detalle_usd} {mov['descripcion']}* — ¿cómo lo pagaste?",
+                    token, reply_markup=pago_keyboard(tarjetas, mov_id))
+            return True
+
+        cat_id = mov.get("categoria_id") or 7
+        updates["estado"] = "pendiente_categoria" if cat_id == 7 and mov["tipo"] == "gasto" else "confirmado"
+        updates["mes_resumen"] = mov.get("mes_resumen") or date.today().strftime("%Y-%m")
+        supabase.table("movimientos").update(updates).eq("id", mov_id).execute()
+        if token:
+            await _answer_callback(callback_id, token)
+            if updates["estado"] == "pendiente_categoria":
+                await _edit_message(chat_id, message_id,
+                    f"📌 Guardé *${nuevo:,.0f}*{detalle_usd} — ¿en qué categoría va *{mov['descripcion']}*?", token)
+                await _send(chat_id, "Elegí categoría:", token, parse_mode="", reply_markup=_category_keyboard(mov_id))
+            else:
+                signo = "-" if mov["tipo"] == "gasto" else "+"
+                await _edit_message(chat_id, message_id, f"✅ Registrado: {signo}${nuevo:,.0f}{detalle_usd}", token)
         return True
 
     if parts[0] == "monto_ok" and len(parts) == 2:
@@ -490,7 +543,7 @@ async def finalizar_pago_tarjeta_unico(
         else:
             await _send(chat_id, text, token, reply_markup=reply_markup)
 
-    if monto < 1000:
+    if 100 < monto < 1000 and mov.get("moneda") != "USD":
         supabase.table("movimientos").update({"estado": "pendiente_confirmacion"}).eq("id", mov_id).execute()
         await _notify(
             f"🤔 Registré *${monto:,.0f}* — ¿está bien o querías decir *${monto * 1000:,.0f}*?",
