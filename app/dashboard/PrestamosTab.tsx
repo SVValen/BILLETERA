@@ -158,7 +158,7 @@ function CuotasView({ prestamo, onBack }: { prestamo: Prestamo; onBack: () => vo
   const [filtro, setFiltro] = useState<'todas' | 'pagadas' | 'pendientes'>('todas')
 
   useEffect(() => {
-    fetchWithAuth(`/api/inversiones?resource=prestamo_cuotas&prestamo_id=${prestamo.id}`)
+    fetchWithAuth(`/api/prestamos?resource=prestamo_cuotas&prestamo_id=${prestamo.id}`)
       .then(r => r.json())
       .then(d => { setCuotas(Array.isArray(d) ? d : []); setLoading(false) })
   }, [prestamo.id])
@@ -280,7 +280,7 @@ export default function PrestamosTab() {
 
   const loadPrestamos = useCallback(async () => {
     setLoadingPrest(true)
-    const r = await fetchWithAuth('/api/inversiones?resource=prestamos')
+    const r = await fetchWithAuth('/api/prestamos?resource=prestamos')
     const data = await r.json()
     setPrestamos(Array.isArray(data) ? data : [])
     setLoadingPrest(false)
@@ -310,7 +310,7 @@ export default function PrestamosTab() {
     setImporting(true)
     setResult(null)
     try {
-      const res = await fetchWithAuth('/api/inversiones', {
+      const res = await fetchWithAuth('/api/prestamos', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ resource: 'importar_prestamo', nombre: nombre.trim(), cuotas: rows }),

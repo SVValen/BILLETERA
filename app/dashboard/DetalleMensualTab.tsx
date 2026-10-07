@@ -87,7 +87,7 @@ export default function DetalleMensualTab({ mes }: { mes: string }) {
           fetchWithAuth(`/api/recurrentes?dias=35`),
           fetchWithAuth(`/api/stats?mes=${mes}&resource=tarjetas`),
           fetchWithAuth(`/api/recurrentes?resource=ingresos_mes&mes=${mes}`),
-          fetchWithAuth(`/api/inversiones?resource=prestamos_mes&mes=${mes}`),
+          fetchWithAuth(`/api/prestamos?resource=prestamos_mes&mes=${mes}`),
         ])
         if (cancelled) return
         const [cData, rData, tData, iData, pData] = await Promise.all([cRes.json(), rRes.json(), tRes.json(), iRes.json(), pRes.json()])

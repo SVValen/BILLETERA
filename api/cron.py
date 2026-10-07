@@ -68,73 +68,8 @@ async def _procesar_recurrentes(hoy: date, token: str) -> int:
     return enviados
 
 
-async def _enviar_resumen_semanal(hoy: date, token: str) -> int:
-    """Los lunes: resumen de la semana pasada. Usa 2 queries en total (no N+1)."""
-    supabase = get_supabase()
-    inicio = hoy - timedelta(days=7)
-    fin = hoy - timedelta(days=1)
-
-    perfiles = supabase.table("perfiles").select("telegram_id").execute()
-    uids = [p["telegram_id"] for p in (perfiles.data or []) if p.get("telegram_id")]
-    if not uids:
-        return 0
-
-    # Una sola query para todos los usuarios en lugar de N queries
-    movs = (
-        supabase.table("movimientos")
-        .select("usuario_id, monto, tipo, categorias(nombre, emoji)")
-        .in_("usuario_id", uids)
-        .neq("estado", "anulado")
-        .gte("fecha", inicio.isoformat())
-        .lte("fecha", fin.isoformat())
-        .execute()
-    )
-
-    # Agrupar por usuario en Python
-    movs_por_uid: dict[str, list] = {uid: [] for uid in uids}
-    for m in (movs.data or []):
-        uid = m["usuario_id"]
-        if uid in movs_por_uid:
-            movs_por_uid[uid].append(m)
-
-    enviados = 0
-    for uid in uids:
-        rows = movs_por_uid[uid]
-        if not rows:
-            continue
-
-        gastos = sum(r["monto"] for r in rows if r["tipo"] == "gasto")
-        ingresos = sum(r["monto"] for r in rows if r["tipo"] == "ingreso")
-
-        por_cat: dict = {}
-        for r in rows:
-            if r["tipo"] != "gasto":
-                continue
-            cat = r.get("categorias") or {}
-            nombre = cat.get("nombre", "Otros")
-            emoji = cat.get("emoji", "📌")
-            por_cat.setdefault(nombre, {"emoji": emoji, "monto": 0})
-            por_cat[nombre]["monto"] += r["monto"]
-
-        top = sorted(por_cat.items(), key=lambda x: x[1]["monto"], reverse=True)[:5]
-        lines = [f"📊 *Resumen {inicio.strftime('%d/%m')}–{fin.strftime('%d/%m')}*\n"]
-        for nombre, d in top:
-            lines.append(f"{d['emoji']} {nombre}: ${d['monto']:,.0f}")
-        lines += [
-            "",
-            f"💸 Gastos: *${gastos:,.0f}*",
-            f"💵 Ingresos: *${ingresos:,.0f}*",
-            f"{'✅' if ingresos >= gastos else '📉'} Saldo: *${ingresos - gastos:,.0f}*",
-        ]
-
-        await _send_telegram(int(uid), "\n".join(lines), token)
-        enviados += 1
-
-    return enviados
-
-
 @app.get("/api/cron")
-async def cron_job(request: Request):
+async def cron_job(request: Request, job: str = ""):
     cron_secret = os.environ.get("CRON_SECRET", "")
     auth = request.headers.get("authorization", "")
     if not cron_secret or auth != f"Bearer {cron_secret}":
@@ -144,17 +79,17 @@ async def cron_job(request: Request):
     if not token:
         return JSONResponse({"error": "no token"}, status_code=500)
 
+    # ?job=gmail_sync → lee los mails de aviso (Santander, Naranja) y registra los gastos
+    if job == "gmail_sync":
+        from lib.gmail_sync import sync_gmail_all_users
+        stats = await sync_gmail_all_users(token=token)
+        return JSONResponse({"ok": True, **stats})
+
     hoy = date.today()
     rec_enviados = await _procesar_recurrentes(hoy, token)
-
-    resumen_enviados = 0
-    if hoy.weekday() == 0:  # Lunes
-        resumen_enviados = await _enviar_resumen_semanal(hoy, token)
 
     return JSONResponse({
         "ok": True,
         "fecha": hoy.isoformat(),
-        "lunes": hoy.weekday() == 0,
         "recordatorios": rec_enviados,
-        "resumenes_semanales": resumen_enviados,
     })

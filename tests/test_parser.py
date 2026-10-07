@@ -96,10 +96,10 @@ class TestCategorize:
         assert categorize_from_keywords("edenor luz mes") == 4
 
     def test_entretenimiento(self):
-        assert categorize_from_keywords("netflix") == 5
+        assert categorize_from_keywords("netflix") == 18
 
     def test_salud(self):
-        assert categorize_from_keywords("farmacia remedios") == 6
+        assert categorize_from_keywords("farmacia remedios") == 21
 
     def test_fallback_otros(self):
         assert categorize_from_keywords("xyzzy algo raro") == 7
@@ -109,7 +109,7 @@ class TestCategorize:
         assert categorize_from_keywords("suscripcion plan mensual") == 18
 
     def test_case_insensitive(self):
-        assert categorize_from_keywords("NETFLIX") == 5
+        assert categorize_from_keywords("NETFLIX") == 18
 
 
 # ── parse_recurrente ───────────────────────────────────────────────────────────

@@ -1,57 +1,5 @@
 import re
 
-# ── Detección de aportes a portafolios ────────────────────────────────────────
-
-_APORTE_RE = re.compile(
-    r"(?:sumé|sume|sumo|agrego|agregué|agregue|deposité|deposite|añadí|añadi|cargué|cargue)"
-    r"\s+\$?([\d.,]+)"
-    r"(?:\s+(USD|u\$s|usd|dólares?|dolares?|ARS|pesos?))?"
-    r"(?:\s+(?:al?|a\s+(?:mi\s+)?|en(?:\s+(?:el?\s+)?|(?:\s+mi\s+)?))\s*(.+))?",
-    re.IGNORECASE,
-)
-_MONEDA_USD_RE = re.compile(r"USD|u\$s|usd|dólares?|dolares?", re.IGNORECASE)
-_MONEDA_ARS_RE = re.compile(r"ARS|pesos?", re.IGNORECASE)
-
-
-def parse_aporte(text: str) -> dict | None:
-    """
-    Detecta aportes de capital a portafolios.
-    Retorna {"monto": float, "moneda": "USD"|"ARS", "hint": str|None} o None.
-
-    Ejemplos:
-      "sumé 500 USD"                     → monto=500, moneda=USD
-      "agregué 200000 pesos al conservador" → monto=200000, moneda=ARS, hint="conservador"
-      "deposité 1000 a mi portafolio"    → monto=1000, moneda=USD (heurística)
-    """
-    m = _APORTE_RE.search(text.strip())
-    if not m:
-        return None
-
-    monto_raw = m.group(1).replace(".", "").replace(",", ".")
-    try:
-        monto = float(monto_raw)
-    except ValueError:
-        return None
-    if monto <= 0:
-        return None
-
-    moneda_str = m.group(2) or ""
-    hint = (m.group(3) or "").strip().lower() or None
-
-    if _MONEDA_ARS_RE.match(moneda_str):
-        moneda = "ARS"
-    elif _MONEDA_USD_RE.match(moneda_str):
-        moneda = "USD"
-    elif hint:
-        # Sin moneda explícita pero con destino: heurística por magnitud
-        moneda = "ARS" if monto >= 50_000 else "USD"
-    else:
-        # Sin moneda ni destino: no es un aporte ("agregué 3000 nafta")
-        return None
-
-    return {"monto": monto, "moneda": moneda, "hint": hint}
-
-
 # ── Detección de gastos recurrentes y cuotas ─────────────────────────────────
 
 def parse_recurrente(text: str) -> int | None:
@@ -129,152 +77,145 @@ INCOME_KEYWORDS = [
 
 # ── Categorías (IDs = IDs reales de la tabla categorias en Supabase) ──
 KEYWORDS: dict[int, list[str]] = {
-    1: [  # Supermercado 🛒
-        "super", "supermercado", "almacen", "almacén", "carrefour", "disco",
-        "dia", "día", "jumbo", "coto", "chino", "verduleria", "verdulería",
-        "granja", "dietetica", "dietética", "mercadito", "bazar", "despensa",
-        "maxixe", "walmart", "vea",
+    # El orden importa: gana la primera categoría con match (las más específicas primero).
+    18: [  # Suscripciones 🔁
+        "google", "apple", "claude", "openai", "chatgpt", "copilot", "spotify",
+        "netflix", "disney", "hulu", "hbo", "max", "paramount", "youtube", "prime",
+        "amazon prime", "crunchyroll", "twitch", "dropbox", "icloud", "drive",
+        "onedrive", "mega", "microsoft", "office", "adobe", "canva", "figma", "notion",
+        "slack", "zoom", "github", "gitlab", "vercel", "heroku", "duolingo",
+        "headspace", "calm", "blinkist", "suscripcion", "suscripción", "membresia",
+        "membresía", "plan mensual", "plan anual", "renovacion", "renovación",
+        "autopago", "débito automático", "debito automatico", "meli+", "meli",
+        "nivel 6", "mercado pago plus",
     ],
-    2: [  # Transporte 🚗
-        "uber", "bolt", "taxi", "remis", "colectivo", "bondi", "subte",
-        "metro", "tren", "sube", "boleto", "nafta", "gasolina", "gnc",
-        "combustible", "carga nafta", "estacionamiento", "cochera",
-        "patente", "vtv", "mecanico", "mecánico", "gomeria", "gomerÃ­a",
-        "lavadero", "autopista", "peaje", "cabify", "didi", "bici",
-        "molinete", "viaje", "viajes", "estacion", "estación",
+    21: [  # Farmacia 💊
+        "farmacia", "medicamento", "medicina", "remedios", "receta", "farmacity",
+        "perfumeria", "perfumería",
+    ],
+    22: [  # Mudanza 📦
+        "mudanza", "flete", "camion mudanza", "embalaje",
+    ],
+    19: [  # Auto 🚗
+        "nafta", "gasolina", "gnc", "combustible", "carga nafta", "estacionamiento",
+        "cochera", "patente", "vtv", "mecanico", "mecánico", "gomeria", "gomerÃ­a",
+        "lavadero", "autopista", "peaje", "seguro auto", "auto", "service", "tecnica",
+        "técnica", "cubiertas", "neumaticos", "neumáticos", "ypf", "shell", "axion",
+        "repuesto",
+    ],
+    10: [  # Departamento 🏠
+        "agua", "aysa", "aysam", "gas", "metrogas", "expensas", "alquiler", "pintura",
+        "carpintero", "plomero", "electricista", "vidrio", "cerradura", "puerta",
+        "ventana", "muebles", "mueble", "cortinas", "alfombra", "lampara", "lámpara",
+        "decoracion", "decoración", "reforma", "arreglo", "reparacion", "reparación",
+        "mantenimiento", "limpieza hogar", "pintor", "albanil", "albañil",
+        "herramientas", "construccion", "construcción", "depto", "departamento",
+        "inmueble", "propiedad", "garantia", "garantía", "heladera", "lavarropas",
+        "cocina", "sillon", "sillón", "colchon", "colchón", "termotanque",
+        "electrodomestico", "electrodoméstico", "inmobiliaria", "bazar hogar", "tapa",
+    ],
+    14: [  # Tecnología 💻
+        "celular", "celu", "iphone", "samsung", "notebook", "laptop", "tablet", "ipad",
+        "auriculares", "cargador", "parlante", "monitor", "teclado", "mouse",
+        "televisor", "smart tv", "computadora", "pc gamer", "impresora", "garbarino",
+        "fravega", "frávega", "musimundo",
+    ],
+    16: [  # Regalos 🎁
+        "regalo", "regalos", "obsequio", "cumpleaños", "cumple", "navidad",
+        "dia del padre", "día del padre", "dia de la madre", "día de la madre",
+    ],
+    15: [  # Compras familia 👨‍👩‍👧
+        "compra papá", "compra papa", "compra mamá", "compra mama", "familia",
+        "sommier", "hierros",
+    ],
+    1: [  # Supermercado 🛒
+        "super", "supermercado", "almacen", "almacén", "carrefour", "disco", "dia",
+        "día", "jumbo", "coto", "chino", "verduleria", "verdulería", "granja",
+        "dietetica", "dietética", "mercadito", "despensa", "maxixe", "walmart", "vea",
     ],
     3: [  # Comida 🍽️
-        "resto", "restaurant", "restaurante", "asado", "pizza", "milanesa",
-        "burger", "delivery", "pedidosya", "rappi", "cafe", "café",
-        "cafeteria", "bar", "chopp", "birra", "cerveza", "vino", "cena",
-        "almuerzo", "desayuno", "sandwich", "sandwiche", "sándwich",
-        "empanada", "locro", "pollo", "carne", "parrilla", "pizzeria",
-        "pizzería", "sushi", "kebab", "medialunas", "facturas",
-        "hamburguesa", "asador", "grill", "fideos", "pasta", "noquis",
-        "ñoquis", "tallarin", "tallarín", "canelones", "comida",
-        "almorcé", "cené", "desayuné", "almorce", "cene", "desayune",
-        "tacos", "mcdonald", "minutas", "helado", "heladeria", "panaderia",
+        "resto", "restaurant", "restaurante", "asado", "pizza", "milanesa", "burger",
+        "delivery", "pedidosya", "rappi", "cafe", "café", "cafeteria", "bar", "chopp",
+        "birra", "cerveza", "vino", "cena", "almuerzo", "desayuno", "sandwich",
+        "sandwiche", "sándwich", "empanada", "locro", "pollo", "carne", "parrilla",
+        "pizzeria", "pizzería", "sushi", "kebab", "medialunas", "facturas",
+        "hamburguesa", "asador", "grill", "fideos", "pasta", "noquis", "ñoquis",
+        "tallarin", "tallarín", "canelones", "comida", "almorcé", "cené", "desayuné",
+        "almorce", "cene", "desayune", "tacos", "mcdonald", "minutas", "helado",
+        "heladeria", "panaderia",
     ],
     4: [  # Servicios 💡
-        "luz", "edenor", "edesur", "agua", "aysa", "aysam", "gas",
-        "metrogas", "internet", "movistar", "personal", "claro", "telecom",
-        "fibertel", "speedy", "telefono", "teléfono", "cablevisión",
-        "cablevision", "directv", "flow", "expensas", "alquiler",
-        "monotributo", "impuesto", "registro", "afiliacion", "afiliación",
-        "obra social", "pami", "sindicato", "aportes", "contribucion",
-        "contribución", "servicios",
+        "luz", "edenor", "edesur", "internet", "movistar", "personal", "claro",
+        "telecom", "fibertel", "speedy", "telefono", "teléfono", "cablevisión",
+        "cablevision", "directv", "flow", "monotributo", "impuesto", "registro",
+        "afiliacion", "afiliación", "obra social", "pami", "sindicato", "aportes",
+        "contribucion", "contribución", "servicios",
     ],
-    5: [  # Entretenimiento 🎬
-        "netflix", "spotify", "prime", "disney", "hulu", "cine",
-        "pelicula", "película", "teatro", "concierto", "show", "entrada",
-        "boleteria", "boleterÃ­a", "videojuegos", "steam", "playstation",
-        "xbox", "nintendo", "juego", "libro", "audiolibro", "kindle",
-        "streaming", "musica", "música", "recital", "boliche", "antro",
-        "disco", "partido", "futbol",
+    6: [  # Salud y cuidado personal 💅
+        "doctor", "medico", "médico", "odontologo", "odontólogo", "dentista", "clinica",
+        "clínica", "hospital", "optica", "óptica", "lentes", "psicologo", "psicólogo",
+        "terapia", "kinesio", "kinésio", "analisis", "análisis", "laboratorio",
+        "radiologia", "radiología", "resonancia", "estudio medico", "sangre",
+        "consulta", "turno medico", "guardia", "emergencia", "ambulancia", "gym",
+        "gimnasio", "gimnasia", "entrenador", "personal trainer", "fitness", "pilates",
+        "yoga", "actividad fisica", "actividad física", "peluqueria", "peluquería",
+        "barberia", "barbería", "corte de pelo", "corte pelo", "tintura", "tinte",
+        "mechas", "alisado", "keratina", "keratin", "botox capilar", "pedicura",
+        "manicura", "uñas", "unas", "gel uñas", "acrilico", "acrílico", "nail", "spa",
+        "masaje", "masajista", "relajacion", "relajación", "depilacion", "depilación",
+        "cera depilatoria", "rasuradora", "skincare", "facial", "crema", "serum",
+        "hidratante", "mascarilla", "esfoliante", "tratamiento facial", "cosmetologia",
+        "cosmetología", "cosmetica", "cosmética", "maquillaje", "maquilladora",
+        "perfume", "desodorante", "jabon", "jabón", "champu", "champú", "shampoo",
+        "acondicionador", "tratamiento capilar", "microblading", "tatuaje", "depl",
+        "depil", "manicuria",
     ],
-    6: [  # Salud 🏥
-        "farmacia", "medicamento", "medicina", "remedios", "doctor",
-        "medico", "médico", "odontologo", "odontólogo", "dentista",
-        "clinica", "clínica", "hospital", "optica", "óptica", "lentes",
-        "psicologo", "psicólogo", "terapia", "kinesio", "kinésio",
-        "analisis", "análisis", "laboratorio", "radiologia", "radiología",
-        "resonancia", "estudio medico", "sangre", "receta", "consulta",
-        "turno medico", "guardia", "emergencia", "ambulancia",
-    ],
-    7: [],  # Otros 📌 — fallback, sin keywords
     8: [  # Ropa 👕
-        "ropa", "remera", "pantalon", "pantalón", "zapatos", "zapatillas",
-        "bolso", "cartera", "cinturon", "cinturón", "bufanda", "gorro",
-        "buzo", "campera", "abrigo", "vestido", "falda", "medias",
-        "sombrero", "anteojos", "gafas", "reloj", "accesorios", "tienda",
-        "shopping", "outlet", "traje", "camisa", "corbata", "calcetines",
-        "bikini", "boxers", "calzado", "marca", "boutique", "local ropa",
+        "ropa", "remera", "pantalon", "pantalón", "zapatos", "zapatillas", "bolso",
+        "cartera", "cinturon", "cinturón", "bufanda", "gorro", "buzo", "campera",
+        "abrigo", "vestido", "falda", "medias", "sombrero", "anteojos", "gafas",
+        "reloj", "accesorios", "tienda", "shopping", "outlet", "traje", "camisa",
+        "corbata", "calcetines", "bikini", "boxers", "calzado", "marca", "boutique",
+        "local ropa",
     ],
     9: [  # Educación 📚
-        "escuela", "colegio", "universidad", "facultad", "arancel",
-        "curso", "clases", "profesor", "tutorias", "tutorías",
-        "maestria", "maestría", "carrera", "diplomado", "taller",
-        "idioma", "ingles", "inglés", "frances", "francés", "aleman",
-        "alemán", "portugues", "portugués", "utiles", "útiles",
-        "cuadernos", "lapices", "lápices", "laptop", "tablet",
-        "academia", "instituto", "formacion", "formación",
-        "capacitacion", "capacitación", "seminario", "workshop",
-        "masterclass", "udemy", "coursera",
-    ],
-    10: [  # Vivienda 🏠
-        "pintura", "carpintero", "plomero", "electricista", "vidrio",
-        "cerradura", "puerta", "ventana", "muebles", "mueble", "cortinas",
-        "alfombra", "lampara", "lámpara", "decoracion", "decoración",
-        "reforma", "arreglo", "reparacion", "reparación", "mantenimiento",
-        "limpieza hogar", "pintor", "albanil", "albañil", "herramientas",
-        "construccion", "construcción", "depto", "departamento",
-        "inmueble", "propiedad", "garantia", "garantía",
+        "escuela", "colegio", "universidad", "facultad", "arancel", "curso", "clases",
+        "profesor", "tutorias", "tutorías", "maestria", "maestría", "carrera",
+        "diplomado", "taller", "idioma", "ingles", "inglés", "frances", "francés",
+        "aleman", "alemán", "portugues", "portugués", "utiles", "útiles", "cuadernos",
+        "lapices", "lápices", "academia", "instituto", "formacion", "formación",
+        "capacitacion", "capacitación", "seminario", "workshop", "masterclass", "udemy",
+        "coursera",
     ],
     11: [  # Mascotas 🐾
-        "perro", "gato", "mascota", "veterinario", "vet", "veterinaria",
-        "croquetas", "alimento perro", "alimento gato", "collar", "correa",
-        "transportin", "transportín", "vacuna", "desparasitante",
-        "peluqueria mascota", "baño mascota", "antiparasitario",
-        "grooming", "accesorios mascota", "mascotera", "mascoteria",
+        "perro", "gato", "mascota", "veterinario", "vet", "veterinaria", "croquetas",
+        "alimento perro", "alimento gato", "collar", "correa", "transportin",
+        "transportín", "vacuna", "desparasitante", "peluqueria mascota", "baño mascota",
+        "antiparasitario", "grooming", "accesorios mascota", "mascotera", "mascoteria",
     ],
     12: [  # Viajes ✈️
-        "vuelo", "avion", "avión", "pasaje", "aereo", "aéreo", "hotel",
-        "alojamiento", "hospedaje", "airbnb", "booking", "hostel",
-        "motel", "excursion", "excursión", "turismo", "tour",
-        "museo", "playa", "montana", "montaña", "camping", "cabana",
-        "cabaña", "resort", "estancia", "albergue", "vacaciones",
-        "destino", "pasaje aereo",
+        "vuelo", "avion", "avión", "pasaje", "aereo", "aéreo", "hotel", "alojamiento",
+        "hospedaje", "airbnb", "booking", "hostel", "motel", "excursion", "excursión",
+        "turismo", "tour", "museo", "playa", "montana", "montaña", "camping", "cabana",
+        "cabaña", "resort", "estancia", "albergue", "vacaciones", "destino",
+        "pasaje aereo",
     ],
-    13: [  # Seguros & Impuestos 🛡️
-        "seguro", "poliza", "póliza", "iibb", "ingresos brutos",
-        "ganancias", "iva", "afip", "abl", "inmobiliario", "tenencia",
-        "seguro auto", "seguro vivienda", "seguro salud", "seguro vida",
-        "responsabilidad civil", "contribuyente",
+    13: [  # Seguros e impuestos 🛡️
+        "seguro", "poliza", "póliza", "iibb", "ingresos brutos", "ganancias", "iva",
+        "afip", "abl", "inmobiliario", "tenencia", "seguro vivienda", "seguro salud",
+        "seguro vida", "responsabilidad civil", "contribuyente",
     ],
-    14: [  # Inversiones 💰
-        "inversion", "inversión", "acciones", "bolsa", "crypto",
-        "bitcoin", "ethereum", "plazo fijo", "fondo mutuo", "fci",
-        "compra dolares", "compra dólares", "dolar", "dólar", "blue",
-        "mep", "ccl", "bonos", "cedear", "merval", "broker",
-        "cotizacion", "cotización", "divisa", "cambio",
-        "operacion financiera", "aporte fondo", "rescate fondo",
+    5: [  # Salidas 🎉
+        "cine", "pelicula", "película", "teatro", "concierto", "show", "entrada",
+        "boleteria", "boleterÃ­a", "musica", "música", "recital", "boliche", "antro",
+        "disco", "partido", "futbol",
     ],
-    15: [  # Compras Online 💳
-        "amazon", "mercado libre", "mercadolibre", "meli", "shop",
-        "tienda online", "e-commerce", "envio", "envío", "paquete",
-        "encomienda", "dhl", "correo argentino", "andreani",
-        "seguimiento pedido", "devolucion", "devolución",
+    2: [  # Transporte 🚌
+        "uber", "bolt", "taxi", "remis", "colectivo", "bondi", "subte", "metro", "tren",
+        "sube", "boleto", "cabify", "didi", "bici", "molinete", "viaje", "viajes",
+        "estacion", "estación",
     ],
-    18: [  # Suscripciones 📱
-        "google", "apple", "claude", "openai", "chatgpt", "copilot",
-        "spotify", "netflix", "disney", "hulu", "hbo", "max", "paramount",
-        "youtube", "prime", "amazon prime", "crunchyroll", "twitch",
-        "dropbox", "icloud", "drive", "onedrive", "mega",
-        "microsoft", "office", "adobe", "canva", "figma", "notion",
-        "slack", "zoom", "github", "gitlab", "vercel", "heroku",
-        "duolingo", "headspace", "calm", "blinkist",
-        "suscripcion", "suscripción", "membresia", "membresía",
-        "plan mensual", "plan anual", "renovacion", "renovación",
-        "autopago", "débito automático", "debito automatico",
-    ],
-    16: [  # Belleza & Bienestar ✨
-        "gym", "gimnasio", "gimnasia", "entrenador", "personal trainer",
-        "fitness", "pilates", "yoga", "membresia", "membresía",
-        "actividad fisica", "actividad física",
-        "peluqueria", "peluquería", "barberia", "barbería",
-        "corte de pelo", "corte pelo", "tintura", "tinte", "mechas",
-        "alisado", "keratina", "keratin", "botox capilar",
-        "pedicura", "manicura", "uñas", "unas", "gel uñas",
-        "acrilico", "acrílico", "nail",
-        "spa", "masaje", "masajista", "relajacion", "relajación",
-        "depilacion", "depilación", "cera depilatoria", "rasuradora",
-        "skincare", "facial", "crema", "serum", "hidratante",
-        "mascarilla", "esfoliante", "tratamiento facial",
-        "cosmetologia", "cosmetología", "cosmetica", "cosmética",
-        "maquillaje", "maquilladora", "perfume", "desodorante",
-        "jabon", "jabón", "champu", "champú", "shampoo",
-        "acondicionador", "tratamiento capilar", "microblading",
-        "tatuaje",
+    7: [  # Otros 📌 — fallback, sin keywords
     ],
 }
 

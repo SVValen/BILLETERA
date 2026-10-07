@@ -7,30 +7,18 @@ import { BilleteraButton } from '@/app/components/design'
 import InicioTab from './InicioTab'
 import DetalleMensualTab from './DetalleMensualTab'
 import PresupuestosTab from './PresupuestosTab'
-import ObjetivosTab from './ObjetivosTab'
 import MovimientosTab from './MovimientosTab'
-import InversionesTab from './InversionesTab'
-import LiquidezTab from './LiquidezTab'
 import PrestamosTab from './PrestamosTab'
 import CategoriasTab from './CategoriasTab'
 
-type Tab = 'inicio' | 'detalle' | 'presupuestos' | 'objetivos' | 'movimientos' | 'inversiones' | 'liquidez' | 'prestamos' | 'categorias'
-
-// Inversiones y Renta Fija ocultas por ahora (módulos sin uso) — reactivar
-// agregándolas de nuevo a TABS cuando se vuelvan a usar.
-const MODULOS_INVERSION_ACTIVOS = false
+type Tab = 'inicio' | 'detalle' | 'presupuestos' | 'movimientos' | 'prestamos' | 'categorias'
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'inicio', label: 'Inicio' },
   { id: 'detalle', label: 'Detalle mensual' },
   { id: 'presupuestos', label: 'Presupuestos' },
-  { id: 'objetivos', label: 'Objetivos' },
   { id: 'movimientos', label: 'Movimientos' },
   { id: 'categorias', label: 'Categorías' },
-  ...(MODULOS_INVERSION_ACTIVOS ? [
-    { id: 'inversiones' as const, label: '📈 Inversiones' },
-    { id: 'liquidez' as const, label: '💼 Renta Fija' },
-  ] : []),
   { id: 'prestamos', label: '🏦 Préstamos' },
 ]
 
@@ -119,11 +107,8 @@ export default function Dashboard() {
         {tab === 'inicio' && <InicioTab mes={mes} />}
         {tab === 'detalle' && <DetalleMensualTab mes={mes} />}
         {tab === 'presupuestos' && <PresupuestosTab mes={mes} />}
-        {tab === 'objetivos' && <ObjetivosTab />}
         {tab === 'movimientos' && <MovimientosTab mes={mes} />}
         {tab === 'categorias' && <CategoriasTab />}
-        {MODULOS_INVERSION_ACTIVOS && tab === 'inversiones' && <InversionesTab />}
-        {MODULOS_INVERSION_ACTIVOS && tab === 'liquidez' && <LiquidezTab />}
         {tab === 'prestamos' && <PrestamosTab />}
       </div>
     </>
