@@ -77,10 +77,13 @@ def registrar_cierre(tarjeta_id: int, mes_resumen: str, fecha_cierre: date) -> i
     ).execute()
     tar = sb.table("tarjetas").select("dia_cierre").eq("id", tarjeta_id).limit(1).execute()
     dia = tar.data[0]["dia_cierre"] if tar.data else None
+    # Solo compras con fecha de compra real (mails / bot). Las filas del Excel o del histórico
+    # ya tienen el mes de pago correcto y su `fecha` es el 1° del mes: no se tocan.
     movs = (
         sb.table("movimientos").select("id, fecha, fecha_compra, mes_resumen")
         .eq("tarjeta_id", tarjeta_id).is_("cuota_plan_id", "null").neq("es_pago_tarjeta", True)
-        .neq("estado", "anulado")
+        .neq("estado", "anulado").not_.is_("fecha_compra", "null")
+        .not_.in_("origen", ["excel", "historico", "excel+email", "pago"])
         .gte("fecha", (fecha_cierre - timedelta(days=40)).isoformat())
         .lte("fecha", (fecha_cierre + timedelta(days=35)).isoformat())
         .execute()
@@ -131,10 +134,27 @@ def marcar_preguntado(tarjeta_id: int, mes_resumen: str) -> None:
     ).execute()
 
 
-def opciones_cierre(mes_resumen: str) -> list[date]:
-    """Fechas posibles de cierre para el resumen que se paga en `mes_resumen`: del 27 del
-    mes anterior al 3 de ese mes."""
+def opciones_cierre(mes_resumen: str, dia_cierre: int | None = None, variable: bool = True) -> list[date]:
+    """Fechas posibles de cierre para el resumen que se paga en `mes_resumen`.
+    - Cierre variable (Santander, BBVA): del 27 del mes anterior al 3 de ese mes.
+    - Cierre fijo (Naranja 27, MP 5): el día de cierre del mes anterior ±3 días."""
     from datetime import timedelta
+    import calendar
     y, m = int(mes_resumen[:4]), int(mes_resumen[5:])
-    inicio_pago = date(y, m, 1)
-    return [inicio_pago + timedelta(days=d) for d in range(-4, 3)]
+    py, pm = (y - 1, 12) if m == 1 else (y, m - 1)
+    if variable or not dia_cierre:
+        base = date(py, pm, min(27, calendar.monthrange(py, pm)[1]))
+        fin = date(y, m, 3)
+        return [base + timedelta(days=d) for d in range((fin - base).days + 1)]
+    base = date(py, pm, min(dia_cierre, calendar.monthrange(py, pm)[1]))
+    return [base + timedelta(days=d) for d in range(-3, 4)]
+
+
+def mes_pago_de_cierre(fecha: date, dia_cierre: int | None) -> str:
+    """Mes en que se paga el resumen que cierra en `fecha`. Las tarjetas que cierran a
+    principio de mes (MP, día 5) pagan el mes siguiente; las que cierran a fin de mes
+    (Naranja 27, Santander/BBVA 29 al 2) pagan el mes siguiente al cierre de fin de mes."""
+    mes = fecha.strftime("%Y-%m")
+    if dia_cierre is not None and dia_cierre <= 10:
+        return mes_siguiente(mes)
+    return mes_siguiente(mes) if fecha.day >= 15 else mes

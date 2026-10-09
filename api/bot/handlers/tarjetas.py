@@ -376,12 +376,19 @@ async def _registrar_pago_tarjeta(
 
 # ── Cierre variable: /cierre y botones que manda el cron ──────────────────────
 
+def _datos_cierre(tarjeta_id: int) -> tuple[int | None, bool]:
+    r = get_supabase().table("tarjetas").select("dia_cierre, cierre_variable").eq("id", tarjeta_id).limit(1).execute()
+    if not r.data:
+        return None, True
+    return r.data[0].get("dia_cierre"), bool(r.data[0].get("cierre_variable"))
+
+
 def teclado_cierre(tarjeta_id: int, mes_resumen: str) -> dict:
     from lib.tarjetas import opciones_cierre
-    fechas = opciones_cierre(mes_resumen)
-    fila1 = [{"text": f.strftime("%d/%m"), "callback_data": f"cierre:{tarjeta_id}:{mes_resumen}:{f.isoformat()}"} for f in fechas[:4]]
-    fila2 = [{"text": f.strftime("%d/%m"), "callback_data": f"cierre:{tarjeta_id}:{mes_resumen}:{f.isoformat()}"} for f in fechas[4:]]
-    return {"inline_keyboard": [fila1, fila2]}
+    dia, variable = _datos_cierre(tarjeta_id)
+    fechas = opciones_cierre(mes_resumen, dia, variable)
+    botones = [{"text": f.strftime("%d/%m"), "callback_data": f"cierre:{tarjeta_id}:{mes_resumen}:{f.isoformat()}"} for f in fechas]
+    return {"inline_keyboard": [botones[i:i + 4] for i in range(0, len(botones), 4)]}
 
 
 async def handle_cierre_cmd(text: str, user_id: str, chat_id: int, token: str) -> None:
@@ -412,8 +419,10 @@ async def handle_cierre_cmd(text: str, user_id: str, chat_id: int, token: str) -
     except ValueError:
         await _send(chat_id, "Fecha inválida. Ej: `/cierre santander 30/10`", token)
         return
-    # El resumen que cierra el 29/10 o el 2/11 se paga en noviembre
-    mes_pago = mes_siguiente(fecha.strftime("%Y-%m")) if fecha.day >= 15 else fecha.strftime("%Y-%m")
+    # El resumen que cierra el 29/10 o el 2/11 se paga en noviembre; MP (cierra el 5) paga el mes siguiente
+    from lib.tarjetas import mes_pago_de_cierre
+    dia, _ = _datos_cierre(tarjeta["id"])
+    mes_pago = mes_pago_de_cierre(fecha, dia)
     n = registrar_cierre(tarjeta["id"], mes_pago, fecha)
     await _send(chat_id, f"✅ *{tarjeta['nombre']}* cierra el {fecha.strftime('%d/%m')} (resumen de {mes_label(mes_pago)})."
                 + (f" Reubiqué {n} compra{'s' if n != 1 else ''}." if n else ""), token)
