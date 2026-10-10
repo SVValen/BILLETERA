@@ -14,11 +14,8 @@ app = FastAPI()
 
 
 async def _send_telegram(chat_id: int, text: str, token: str, reply_markup: dict | None = None) -> None:
-    payload: dict = {"chat_id": chat_id, "text": text, "parse_mode": "Markdown"}
-    if reply_markup:
-        payload["reply_markup"] = reply_markup
-    async with httpx.AsyncClient() as client:
-        await client.post(f"https://api.telegram.org/bot{token}/sendMessage", json=payload)
+    from api.bot.tg import _send
+    await _send(chat_id, text, token, reply_markup=reply_markup)
 
 
 def _recurrente_keyboard(rec_id: int) -> dict:

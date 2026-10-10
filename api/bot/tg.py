@@ -2,6 +2,16 @@ import os
 import httpx
 
 
+def _es_error_de_formato(resp: dict) -> bool:
+    """Telegram rechaza el mensaje si el Markdown queda mal armado, por ejemplo cuando el
+    comercio de un mail del Santander trae un asterisco ("DLO*PedidosYa", "MERPAGO*KIOSKO")."""
+    return not resp.get("ok", True) and "parse entities" in str(resp.get("description", "")).lower()
+
+
+def _sin_markdown(text: str) -> str:
+    return text.replace("*", "").replace("_", " ").replace("`", "")
+
+
 async def _send(chat_id: int, text: str, token: str,
                 parse_mode: str = "Markdown", reply_markup: dict | None = None) -> dict:
     payload: dict = {"chat_id": chat_id, "text": text}
@@ -13,7 +23,22 @@ async def _send(chat_id: int, text: str, token: str,
         r = await client.post(
             f"https://api.telegram.org/bot{token}/sendMessage", json=payload
         )
-        return r.json()
+        try:
+            resp = r.json()
+        except ValueError:
+            return {"ok": False}
+        if parse_mode and _es_error_de_formato(resp):
+            # Reintento sin formato: mejor un mensaje sin negritas que ningún mensaje
+            payload.pop("parse_mode", None)
+            payload["text"] = _sin_markdown(text)
+            r = await client.post(
+                f"https://api.telegram.org/bot{token}/sendMessage", json=payload
+            )
+            try:
+                resp = r.json()
+            except ValueError:
+                return {"ok": False}
+        return resp
 
 
 async def _answer_callback(callback_id: str, token: str, text: str | None = None) -> None:
@@ -36,10 +61,21 @@ async def _edit_message(chat_id: int, message_id: int, text: str, token: str,
     if reply_markup:
         payload["reply_markup"] = _json.dumps(reply_markup)
     async with httpx.AsyncClient() as client:
-        await client.post(
+        r = await client.post(
             f"https://api.telegram.org/bot{token}/editMessageText",
             json=payload,
         )
+        try:
+            resp = r.json()
+        except ValueError:
+            return
+        if parse_mode and _es_error_de_formato(resp):
+            payload.pop("parse_mode", None)
+            payload["text"] = _sin_markdown(text)
+            await client.post(
+                f"https://api.telegram.org/bot{token}/editMessageText",
+                json=payload,
+            )
 
 
 async def _transcribe_voice(file_id: str, token: str) -> str | None:
