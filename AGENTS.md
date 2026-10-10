@@ -69,6 +69,9 @@ semanal). La base anterior quedó copiada en el esquema `backup_v1` de Supabase.
 
 ## Mails (Gmail IMAP)
 Santander (`lib/email_parser_santander.py`) y Naranja X (`lib/email_parser_naranja.py`).
+Cada corrida busca desde `usuario_gmail_config.ultimo_sync_at` − 1 día (mínimo 5 días, máximo 60), así un
+cron caído no pierde mails. Backfill manual: `/api/cron?job=gmail_sync&desde=YYYY-MM-DD` (no mueve la marca).
+GitHub corre el schedule cada 4–7 h aunque diga 20 min.
 
 ## Variables de entorno (nunca en cliente)
 `SUPABASE_SERVICE_ROLE_KEY`, `TELEGRAM_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, `CRON_SECRET`, `GROQ_API_KEY`

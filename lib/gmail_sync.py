@@ -40,7 +40,9 @@ logger = logging.getLogger("gmail_sync")
 
 IMAP_HOST = "imap.gmail.com"
 SANTANDER_SENDER = "mensajesyavisos@mails.santander.com.ar"
-_DIAS_VENTANA_BUSQUEDA = 5  # ventana de reintento: cubre mails leídos manualmente sin depender de \Seen
+_DIAS_VENTANA_BUSQUEDA = 5  # ventana mínima: cubre mails leídos manualmente sin depender de \Seen
+_DIAS_MARGEN_ULTIMO_SYNC = 1  # se relee desde 1 día antes de la última corrida completa
+_DIAS_VENTANA_MAXIMA = 60  # tope si el cron estuvo caído mucho tiempo
 _MESES_IMAP = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
 
@@ -56,7 +58,10 @@ def _decode_header_value(raw: str | None) -> str:
     out = []
     for text, enc in parts:
         if isinstance(text, bytes):
-            out.append(text.decode(enc or "utf-8", errors="ignore"))
+            try:
+                out.append(text.decode(enc or "utf-8", errors="ignore"))
+            except LookupError:  # ej. "unknown-8bit"
+                out.append(text.decode("utf-8", errors="ignore"))
         else:
             out.append(text)
     return "".join(out)
@@ -359,10 +364,58 @@ async def _avisar_fallo_login(usuario_id: str, token: str) -> None:
 _MAX_DETALLE_ERRORES = 5
 
 
-async def sync_gmail_for_user(usuario_id: str, gmail_email: str, gmail_app_password: str, token: str) -> dict:
+def _parse_ts(valor) -> datetime | None:
+    if not valor:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(valor).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def calcular_desde(hoy: date, ultimo_sync_at, desde_forzado: date | None = None) -> date:
+    """
+    Fecha SINCE de la búsqueda IMAP. Antes era fija (hoy − 5 días): si el cron se caía más
+    de 5 días, los mails de ese hueco no se leían nunca. Ahora arranca desde la última corrida
+    completa (− 1 día de margen), nunca menos de 5 días ni más de 60. `desde_forzado` (backfill
+    manual con ?desde=YYYY-MM-DD) manda sobre todo lo demás.
+    """
+    if desde_forzado:
+        return desde_forzado
+    minimo = hoy - timedelta(days=_DIAS_VENTANA_BUSQUEDA)
+    ultimo = _parse_ts(ultimo_sync_at)
+    if not ultimo:
+        return minimo
+    desde = ultimo.date() - timedelta(days=_DIAS_MARGEN_ULTIMO_SYNC)
+    return max(min(desde, minimo), hoy - timedelta(days=_DIAS_VENTANA_MAXIMA))
+
+
+def _fecha_mail(msg: email.message.Message) -> datetime | None:
+    try:
+        dt = parsedate_to_datetime(msg.get("Date"))
+    except Exception:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+async def sync_gmail_for_user(
+    usuario_id: str, gmail_email: str, gmail_app_password: str, token: str,
+    ultimo_sync_at=None, desde_forzado: date | None = None,
+) -> dict:
     """Procesa los avisos de Santander y Naranja de un usuario. Aísla fallos por mail."""
     supabase = get_supabase()
+    inicio = datetime.now(timezone.utc)
     stats = {"vistos": 0, "procesados": 0, "pendientes_tarjeta": 0, "ignorados": 0, "errores": 0, "errores_detalle": []}
+    # Fecha del mail más viejo que quedó sin procesar (pendiente o con error): la próxima
+    # corrida tiene que volver a buscar desde ahí, así que no se avanza la marca más allá.
+    mas_viejo_sin_procesar: datetime | None = None
+
+    def _anotar_sin_procesar(dt: datetime | None) -> None:
+        nonlocal mas_viejo_sin_procesar
+        dt = dt or inicio
+        if mas_viejo_sin_procesar is None or dt < mas_viejo_sin_procesar:
+            mas_viejo_sin_procesar = dt
 
     try:
         imap = imaplib.IMAP4_SSL(IMAP_HOST)
@@ -375,7 +428,9 @@ async def sync_gmail_for_user(usuario_id: str, gmail_email: str, gmail_app_passw
 
     try:
         imap.select("INBOX")
-        desde = _imap_since_date(date.today() - timedelta(days=_DIAS_VENTANA_BUSQUEDA))
+        fecha_desde = calcular_desde(date.today(), ultimo_sync_at, desde_forzado)
+        stats["desde"] = fecha_desde.isoformat()
+        desde = _imap_since_date(fecha_desde)
         # No filtramos por UNSEEN: un mail leído manualmente (preview de Gmail, celular, etc.)
         # no debe perderse — el dedup real es por Message-ID en email_procesados.
         a_procesar: list[tuple[bytes, str]] = []
@@ -384,31 +439,36 @@ async def sync_gmail_for_user(usuario_id: str, gmail_email: str, gmail_app_passw
             if status == "OK" and data and data[0]:
                 a_procesar.extend((num, banco) for num in data[0].split())
 
+        # Con la ventana más larga hay más mails por corrida: se trae la lista de Message-ID ya
+        # procesados una sola vez y solo se baja el cuerpo completo de los mails nuevos.
+        procesados_r = (
+            supabase.table("email_procesados").select("message_id")
+            .eq("usuario_id", usuario_id).gte("procesado_at", (fecha_desde - timedelta(days=2)).isoformat())
+            .execute()
+        )
+        ya_procesados = {r["message_id"] for r in (procesados_r.data or [])}
+
         for num, banco in a_procesar:
             stats["vistos"] += 1
             tipo = None
+            fecha_dt = None
             try:
-                status, msg_data = imap.fetch(num, "(BODY.PEEK[])")
-                if status != "OK" or not msg_data or not msg_data[0]:
+                status, hdr_data = imap.fetch(num, "(BODY.PEEK[HEADER.FIELDS (MESSAGE-ID DATE)])")
+                if status != "OK" or not hdr_data or not hdr_data[0]:
                     continue
-                raw = msg_data[0][1]
-                msg = email.message_from_bytes(raw)
-
-                message_id = msg.get("Message-ID", "").strip()
+                hdr = email.message_from_bytes(hdr_data[0][1])
+                message_id = (hdr.get("Message-ID") or "").strip()
                 if not message_id:
                     continue
-
-                ya_procesado = (
-                    supabase.table("email_procesados")
-                    .select("id")
-                    .eq("usuario_id", usuario_id)
-                    .eq("message_id", message_id)
-                    .limit(1)
-                    .execute()
-                )
-                if ya_procesado.data:
-                    imap.store(num, "+FLAGS", "\\Seen")
+                fecha_dt = _fecha_mail(hdr)
+                if message_id in ya_procesados:
                     continue
+
+                status, msg_data = imap.fetch(num, "(BODY.PEEK[])")
+                if status != "OK" or not msg_data or not msg_data[0]:
+                    _anotar_sin_procesar(fecha_dt)
+                    continue
+                msg = email.message_from_bytes(msg_data[0][1])
 
                 subject = _decode_header_value(msg.get("Subject"))
                 body = _extract_body(msg)
@@ -442,6 +502,7 @@ async def sync_gmail_for_user(usuario_id: str, gmail_email: str, gmail_app_passw
                 if not listo:
                     # Tarjeta sin resolver o sin tipo de cambio disponible: reintentar en el próximo poll
                     stats["pendientes_tarjeta"] += 1
+                    _anotar_sin_procesar(fecha_dt)
                     continue
 
                 supabase.table("email_procesados").insert({
@@ -458,6 +519,7 @@ async def sync_gmail_for_user(usuario_id: str, gmail_email: str, gmail_app_passw
                     tipo, type(e).__name__, usuario_id,
                 )
                 stats["errores"] += 1
+                _anotar_sin_procesar(fecha_dt)
                 if len(stats["errores_detalle"]) < _MAX_DETALLE_ERRORES:
                     stats["errores_detalle"].append(f"tipo={tipo} exc={type(e).__name__}")
     finally:
@@ -466,10 +528,21 @@ async def sync_gmail_for_user(usuario_id: str, gmail_email: str, gmail_app_passw
         except Exception:
             pass
 
+    # La corrida terminó: la próxima arranca desde acá (o desde el mail más viejo que quedó
+    # sin procesar). Un backfill manual no mueve la marca.
+    if not desde_forzado:
+        marca = min(inicio, mas_viejo_sin_procesar) if mas_viejo_sin_procesar else inicio
+        try:
+            supabase.table("usuario_gmail_config").update(
+                {"ultimo_sync_at": marca.isoformat()}
+            ).eq("usuario_id", usuario_id).execute()
+        except Exception as e:
+            logger.warning("gmail_sync: no pude guardar ultimo_sync_at (%s) usuario_id=%s", type(e).__name__, usuario_id)
+
     return stats
 
 
-async def sync_gmail_all_users(token: str = "") -> dict:
+async def sync_gmail_all_users(token: str = "", desde_forzado: date | None = None) -> dict:
     """Entry point del cron: itera todos los usuarios con Gmail configurado y activo."""
     import os
     if not token:
@@ -482,8 +555,12 @@ async def sync_gmail_all_users(token: str = "") -> dict:
     for cfg in (rows.data or []):
         usuario_id = str(cfg["usuario_id"])
         try:
-            stats = await sync_gmail_for_user(usuario_id, cfg["gmail_email"], cfg["gmail_app_password"], token)
+            stats = await sync_gmail_for_user(
+                usuario_id, cfg["gmail_email"], cfg["gmail_app_password"], token,
+                ultimo_sync_at=cfg.get("ultimo_sync_at"), desde_forzado=desde_forzado,
+            )
             total["usuarios"] += 1
+            total.setdefault("desde", stats.get("desde"))
             for k in ("vistos", "procesados", "pendientes_tarjeta", "ignorados", "errores"):
                 total[k] += stats.get(k, 0)
             if len(total["errores_detalle"]) < _MAX_DETALLE_ERRORES:

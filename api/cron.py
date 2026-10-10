@@ -125,7 +125,7 @@ def _asegurar_alquileres(hoy: date) -> int:
 
 
 @app.get("/api/cron")
-async def cron_job(request: Request, job: str = ""):
+async def cron_job(request: Request, job: str = "", desde: str = ""):
     cron_secret = os.environ.get("CRON_SECRET", "")
     auth = request.headers.get("authorization", "")
     if not cron_secret or auth != f"Bearer {cron_secret}":
@@ -136,9 +136,16 @@ async def cron_job(request: Request, job: str = ""):
         return JSONResponse({"error": "no token"}, status_code=500)
 
     # ?job=gmail_sync → lee los mails de aviso (Santander, Naranja) y registra los gastos
+    # ?job=gmail_sync&desde=YYYY-MM-DD → backfill manual desde esa fecha (no mueve la marca)
     if job == "gmail_sync":
         from lib.gmail_sync import sync_gmail_all_users
-        stats = await sync_gmail_all_users(token=token)
+        desde_forzado = None
+        if desde:
+            try:
+                desde_forzado = date.fromisoformat(desde)
+            except ValueError:
+                return JSONResponse({"error": "desde inválido, usar YYYY-MM-DD"}, status_code=400)
+        stats = await sync_gmail_all_users(token=token, desde_forzado=desde_forzado)
         return JSONResponse({"ok": True, **stats})
 
     hoy = date.today()
