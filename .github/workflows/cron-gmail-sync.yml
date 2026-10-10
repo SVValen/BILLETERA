@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: '17 * * * *'  # cada hora en un minuto raro: GitHub posterga menos que cada 20 min
   workflow_dispatch:
+    inputs:
+      desde:
+        description: 'Releer mails desde esta fecha (YYYY-MM-DD). Vacío = corrida normal'
+        required: false
+        default: ''
 
 jobs:
   trigger:
@@ -14,7 +19,7 @@ jobs:
           HTTP_CODE=$(curl -s -o /tmp/response.txt -w "%{http_code}" \
             -X GET \
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
-            "https://billetera-gamma.vercel.app/api/cron?job=gmail_sync")
+            "https://billetera-gamma.vercel.app/api/cron?job=gmail_sync&desde=${{ github.event.inputs.desde }}")
           echo "HTTP Status: $HTTP_CODE"
           cat /tmp/response.txt
           if [ "$HTTP_CODE" -ge 400 ]; then
