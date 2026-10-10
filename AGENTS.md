@@ -16,7 +16,7 @@ semanal). La base anterior quedó copiada en el esquema `backup_v1` de Supabase.
 - Supabase (Postgres + Auth). Proyecto `BILLETERA` (ref `tuzrnadpcitcwalmtbnl`)
 - Vercel (cuenta SSValen, Hobby; deploy automático al pushear a `main`) — https://billetera-gamma.vercel.app
 - Telegram Bot API, Groq Whisper (audios)
-- GitHub Actions: `cron-gmail-sync.yml` cada 20 min → `/api/cron?job=gmail_sync`
+- GitHub Actions: `cron-gmail-sync.yml` cada hora (minuto 17) → `/api/cron?job=gmail_sync`
 - Vercel Cron diario 12:00 UTC → `/api/cron`
 
 ## Modelo de datos (v2)
@@ -71,7 +71,7 @@ semanal). La base anterior quedó copiada en el esquema `backup_v1` de Supabase.
 Santander (`lib/email_parser_santander.py`) y Naranja X (`lib/email_parser_naranja.py`).
 Cada corrida busca desde `usuario_gmail_config.ultimo_sync_at` − 1 día (mínimo 5 días, máximo 60), así un
 cron caído no pierde mails. Backfill manual: `/api/cron?job=gmail_sync&desde=YYYY-MM-DD` (no mueve la marca).
-GitHub corre el schedule cada 4–7 h aunque diga 20 min.
+GitHub puede postergar el schedule varias horas; con la marca de última lectura no se pierde nada.
 
 ## Variables de entorno (nunca en cliente)
 `SUPABASE_SERVICE_ROLE_KEY`, `TELEGRAM_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, `CRON_SECRET`, `GROQ_API_KEY`

@@ -2,7 +2,7 @@ name: Cron Gmail Sync
 
 on:
   schedule:
-    - cron: '*/20 * * * *'
+    - cron: '17 * * * *'  # cada hora en un minuto raro: GitHub posterga menos que cada 20 min
   workflow_dispatch:
 
 jobs:
